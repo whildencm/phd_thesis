@@ -1,0 +1,254 @@
+########################
+# SPECIFIC DIR #
+########################
+ARCHIVE_chimeclip/
+DEP_chimeclip/
+DEP_chimeclip_v2/
+exploratory/
+
+# Output files
+**/other_data/
+**/microscopy/
+**/results/
+**/logs/
+**/slurm-logs/
+**/summaryFiles/
+**/plots/
+riboseq/config/Protein_coding_genes_GTF.csv
+
+
+########################
+# General / OS files   #
+########################
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+
+# Archives
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.tar.bz2
+*.rar
+*.7z
+
+########################
+# Python               #
+########################
+
+# Byte-compiled / optimized
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+*.pyd
+*.dll
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.conda/
+conda-env/
+*.conda
+*.ipynb_checkpoints
+
+# Packaging / build
+build/
+dist/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+pytest_cache/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+profile_default/
+ipython_config.py
+
+# Logs
+*.log
+
+# Django/Flask/etc (if used)
+local_settings.py
+db.sqlite3
+instance/
+*.mo
+*.pot
+
+# MyPy / type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytype/
+
+# Other tooling
+.pyre/
+.pyre_configuration.local
+.pdm.toml
+poetry.lock
+.poetry/
+
+########################
+# R                    #
+########################
+
+# R history and session data
+.Rhistory
+.Rapp.history
+.RData
+.Ruserdata
+
+# RStudio
+.Rproj.user/
+*.Rproj
+.Rproj.user
+.Rhistory
+.RDataTmp
+
+# R build / cache
+.Rcheck/
+.Rbuildignore
+.Rproj.user/
+.RData
+.Rhistory
+*.utf8.md
+*.knit.md
+*.Rout
+*_cache/
+cache/
+*.RDS
+
+# R package management
+packrat/
+packrat.lock
+renv/
+renv.lock
+.Renviron
+.Rprofile
+
+# Rmarkdown & knitr
+*.utf8.md
+*.knit.md
+*_cache/
+cache/
+
+########################
+# Snakemake            #
+########################
+
+# Snakemake working dirs
+.snakemake/
+.snakemake/log/
+.snakemake/conda/
+.snakemake/scripts/
+.snakemake/shadow/
+.snakemake/metadata/
+
+# Common Snakemake outputs (adjust as needed)
+logs/
+log/
+results/
+output/
+out/
+reports/
+report.html
+profile/
+
+# Checkpoints / temp
+checkpoints/
+tmp/
+temp/
+*.tmp
+*.temp
+
+########################
+# Environments / data  #
+########################
+
+# Environments
+.env
+.env.*
+*.env
+
+# Large data (adjust patterns to taste)
+data/raw/
+data/interim/
+*.h5
+*.hdf5
+*.bam
+*.bai
+*.sam
+*.vcf
+*.vcf.gz
+*.fastq
+*.fastq.gz
+*.fq
+*.fq.gz
+
+########################
+# Editors / IDEs       #
+########################
+
+# VS Code
+.vscode/
+.history/
+
+# JetBrains / RStudio project caches
+.idea/
+*.iml
+
+# Other editors
+*~ 
+*.swp
+*.swo
+*.tmp
+*.bak
