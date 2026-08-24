@@ -1,0 +1,58 @@
+# profiles/slurm_repeatMapping/config.yaml
+#
+# SLURM profile for the snoRNA eclip mapping pipeline.
+# Two parallel mapping strategies are run:
+#   - mapOne:    permissive mismatches, no multimappers (one representative copy)
+#   - mapUnique: strict mismatches, multimappers allowed (one copy per unique variant)
+#
+# Usage:
+#   snakemake --profile profiles/slurm_repeatMapping --configfile config.yaml
+#
+# Partition / account: update slurm_partition and slurm_account to match your cluster.
+# Memory notes:
+#   - STAR indexing of mm39-scale genomes typically requires ~40-60 GB
+#   - STAR mapping with genomeLoad NoSharedMemory loads the full genome
+#     per job; ~32-40 GB is sufficient for mm39-sized masked genomes
+
+executor: slurm
+jobs: 61 
+use-conda: true
+
+default-resources:
+  - slurm_partition=whipple
+  - slurm_account=whipple_lab
+  - runtime=500
+  - mem_mb=12000
+
+set-resources:
+
+  # -----------------------------------------------------------------------
+  # Genome index rules
+  # STAR genome generation is memory-intensive; masked genomes are still
+  # mm39-scale so memory requirements are similar to the full genome.
+  # Only runs once per genome — set a generous runtime.
+  # -----------------------------------------------------------------------
+  indexOne:
+    mem_mb: 80000
+
+
+  indexUnique:
+    mem_mb: 80000
+
+
+  # -----------------------------------------------------------------------
+  # Mapping rules
+  # genomeLoad NoSharedMemory means each job loads its own genome copy.
+  # ~32-40 GB typically sufficient for mm39; 40 GB gives headroom.
+  # mapUnique may run longer per sample due to stricter multi-mapping
+  # resolution (more candidate alignments evaluated per read).
+  # -----------------------------------------------------------------------
+  mapOne:
+    mem_mb: 80000
+
+
+  mapUnique:
+    mem_mb: 80000
+
+  remove_pcr_duplicates:
+    mem_mb: 80000

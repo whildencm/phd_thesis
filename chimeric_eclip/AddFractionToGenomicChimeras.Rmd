@@ -1,0 +1,223 @@
+---
+title: "Untitled"
+author: "Courtney Whilden"
+date: "2026-04-16"
+output: html_document
+---
+
+# Quickly calculate fraction-in-peak for genome peaks..
+```{r}
+# PLOT THEME
+paletteCW <- c(
+  Pink_CW      = "#EC008C",
+  Teal_CW      = "#008C8C",
+  Charcoal_CW  = "#2E2E2E",
+  LimeGreen_CW = "#9BC53D",
+  SoftOrange_CW= "#F4A261",
+  Purple_CW    = "#7B2CBF"
+)
+
+themeCW <- function(baseSize = 6) {
+  theme_minimal(base_size = baseSize) %+replace%
+    theme(
+      # panel
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(fill = NA, colour = "black", size = 0.5),
+      
+      # axes lines/ticks/text
+      axis.line = element_blank(),                      # border handles the visual frame
+      axis.ticks = element_line(size = 0.5),
+      axis.ticks.length = unit(0.03, "in"),
+      axis.text = element_text(size = baseSize, colour = "black"),
+      axis.title = element_text(size = baseSize, colour = "black"),
+      
+      # legend
+      legend.key        = element_blank(),
+      legend.background = element_blank(),
+      legend.text       = element_text(size = baseSize),
+      legend.title = element_blank(),
+      
+      legend.key.size   = unit(0.2, "cm"),
+      legend.spacing.y  = unit(1, "pt"),
+      legend.margin     = margin(0, 0, 0, 0, unit = "pt"),
+      legend.position = "top",
+      
+      # plot text & margins
+      plot.title = element_text(size = baseSize, colour = "black"),
+      plot.subtitle = element_text(size = baseSize, colour = "black"),
+      plot.margin = margin(5, 5, 5, 5, unit = "pt"),
+      
+      aspect.ratio=1
+    )
+}
+
+
+######################################
+# Function to save plots in my preferred size
+plotSave <- function(plotVar, fileName, outSave=outDir,w=1.5,h=1.5){
+  ggsave(
+  filename = file.path(outSave,fileName),
+  plot = plotVar,
+  device = "pdf",
+  width = w,
+  height = h,
+  units = "in"
+  )
+}
+```
+
+
+```{r}
+library(tidyverse, quietly=TRUE)
+library(ggplot2, quietly=TRUE)
+library(tools, quietly=TRUE)
+library(ggrepel, quietly=TRUE)
+library(ggVennDiagram,quietly = TRUE)
+
+macRoot <- "/Volumes/whipple_lab/Users/cwhilden/PROJECTS/THESIS/chapter2"
+
+
+totalCounts<- read_csv(file.path(macRoot,"plots/Snord116_chimeras/Snord116_ChimerasRawPerClass.csv"))
+  
+data_repA <- read_csv(file.path(macRoot,"summaryFiles/peakSummaryFiles/iNeuron_A_Snord116genomePeaks.csv"))
+data_repB <- read_csv(file.path(macRoot,"summaryFiles/peakSummaryFiles/iNeuron_B_Snord116genomePeaks.csv"))
+probe<- read_csv(file.path(macRoot,"summaryFiles/peakSummaryFiles/Probe_Snord116genomePeaks.csv"))
+
+```
+
+Get total number of Snord116 genomic chimeras in each sample
+```{r}
+genomeTotal<-totalCounts%>%
+  filter(target %in% c('other_counted','premRNA','psuedogene'))
+
+col_sums <- genomeTotal %>%
+  select(-...1, -target) %>%  # remove non-numeric columns
+  summarise(across(everything(), sum, na.rm = TRUE))
+
+```
+
+
+Get fraction
+```{r}
+data_repA$fraction<-data_repA$`reads in CLIP`/col_sums$SSEXPT8_IP_A_S3_R1_001 
+  
+data_repB$fraction<-data_repB$`reads in CLIP`/col_sums$SSEXPT8_IP_B_S4_R1_001
+probe$fraction<-probe$`reads in CLIP`/col_sums$`TDZ-7_S7_R1_001`
+
+
+filterA<- data_repA %>%  filter(enriched_or_depleted == 'enriched',
+         !(`Gene Type` %in% c('rRNA','snRNA','scaRNA')),
+         log2_fold_change >= 1.5)
+
+filterB <- data_repB%>%  filter(enriched_or_depleted == 'enriched',
+        !(`Gene Type` %in% c('rRNA','snRNA','scaRNA')),
+         log2_fold_change >= 1.5)
+
+
+filterProbe <- probe%>%  filter(enriched_or_depleted == 'enriched',
+        !(`Gene Type` %in% c('rRNA','snRNA','scaRNA')),
+         log2_fold_change >= 1.5)
+
+
+```
+
+
+iNeuron Summary
+```{r}
+# Assuming you want to join filterA (RepA) with filterB (RepB):
+join_A <- filterA %>%
+  select(all_of(c('name','Gene Name',"Gene Type","fraction","log2_fold_change"))) %>%
+  mutate(sample = 'iNeuron_RepA')
+
+join_B <- filterB %>%
+  select(all_of(c('name','Gene Name',"Gene Type","fraction","log2_fold_change"))) %>%
+  mutate(sample = 'iNeuron_RepB')
+
+# Join on the common columns: name, Gene Name, and Gene Type
+iNeurons <- left_join(
+  join_A,
+  join_B,
+  by = c('name', 'Gene Name', 'Gene Type'),
+  suffix = c("_A", "_B")
+)
+
+write.csv(iNeurons,file.path(macRoot,"summaryFiles/iNeuron_GenomicPeaks_Enriched.csv"))
+
+gene_type_counts <- iNeurons %>%
+  count(`Gene Type`, name = "Count") %>%
+  arrange(desc(Count))
+```
+
+
+# add probe
+```{r}
+
+```
+
+
+```{r}
+gene_type_counts_probe <- filterProbe %>%
+  count(`Gene Type`, name = "Count") %>%
+  arrange(desc(Count))
+```
+
+
+
+```{r}
+plot_data <- filterProbe %>%
+  # Sort from highest enrichment to lowest
+  arrange(desc(log2_fold_change)) %>%
+  # Add a rank column (1 = highest enrichment)
+  mutate(Rank = row_number())
+
+# Identify the top 15 genes to label on the plot so it doesn't get cluttered
+top_genes <- plot_data %>% head(20)
+
+panel_a <- plot_data %>%
+  # Count how many of each gene type there are
+  count(`Gene Type`) %>%
+  # Reorder the bars so the largest is on top
+  ggplot(aes(x = reorder(`Gene Type`, n), y = n, fill = `Gene Type`)) +
+  geom_col(color = "black", width = 0.5) +
+  # Add text labels at the end of the bars
+  geom_text(aes(label = n), hjust = -0.2, size = 4) +
+  coord_flip() + # Make it horizontal
+  labs(title = "A. Distribution of Peak Biotypes",
+       x = "RNA Biotype",
+       y = "Number of Enriched Peaks") +
+  # Expand Y axis slightly so the text labels don't get cut off
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) + themeCW()
+
+panel_a
+outDir<-file.path(macRoot,"summaryFiles")
+plotSave(panel_a,"ProbeEnriched_GenomeChimeras_BarPlot.pdf",h=2,w=4)
+```
+
+```{r}
+panel_b <- ggplot(plot_data, aes(x = Rank, y = log2_fold_change, color = `Gene Type`)) +
+  # Add points
+  geom_point(size = 1.5, alpha = 0.8) +
+  # Add labels to only the top 15 genes, repelled so they don't overlap
+  geom_text_repel(data = top_genes, 
+                  aes(label = `Gene Name`), 
+                  size = 2, 
+                  color = "black",
+                  max.overlaps = Inf,       # <--- THIS FORCES ALL LABELS TO SHOW
+                  box.padding = 0.5,
+                  point.padding = 0.3,
+                  min.segment.length = 0,
+                  segment.color = "grey50") +
+  labs(title = "Peak Enrichment Rank",
+       x = "Peak Rank",
+       y = expression("log"[2]*" Peak Fold Enrichment"),
+       color = "RNA Biotype") + themeCW()
+
+panel_b
+
+plotSave(panel_b,"ProbeEnriched_Peaks_FoldEnrichScatter.pdf",w=3,h=3)
+```
+
+
+

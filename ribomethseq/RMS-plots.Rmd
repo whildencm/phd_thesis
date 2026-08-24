@@ -1,0 +1,514 @@
+---
+title: "RMS-plots"
+author: "Courtney Whilden"
+date: "2026-03-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse,quietly=TRUE)
+```
+
+```{r}
+RMS_dir<-"/Volumes/whipple_lab/Users/cwhilden/PROJECTS/THESIS/chapter2_RMS/results/rmsScores/rRNA"
+Nm<-read_csv("/Volumes/whipple_lab/Users/cwhilden/PIPELINE/ribomethseq/data/mouseNmSites.csv") %>%
+  mutate(ID=paste(TARGET,POSITION,sep="_"))
+```
+
+rRNA 
+```{r}
+dataFiles<-list.files(path = RMS_dir, 
+                        pattern = "\\.rms.txt$", 
+                        full.names = TRUE)
+
+# Extract sample/snoRNA information from filename
+names<-sub("\\.rms.txt$","",basename(dataFiles))
+
+# generate a named list of data
+data <- purrr::set_names(dataFiles, names) %>%
+  purrr::map(~ readr::read_tsv(.x))
+  
+aseD=11953
+aseDp=10413
+
+# Merge named list into a single data frame
+merged_data <- dplyr::bind_rows(data, .id = "sample")  %>%
+  tidyr::separate(sample, 
+                  into = c("condition", "tissue", "sampleid"), 
+                  sep  = "_") %>%
+  filter(chrom=='45S_Rn45s') %>%
+  mutate(
+    ID    = paste(chrom, position, sep = "_"),
+    status = if_else(ID %in% Nm$ID, 'known Nm', 'unknown'),
+    aseD  = abs(position - aseD),
+    aseDp = abs(position - aseDp)) %>%
+    mutate(site_status=case_when(position>=10415 & position<=10427 ~ "aseD",
+                         position>=11961 & position<=11971 ~ "aseDp",
+                         status == 'known Nm' ~ 'Nm',
+                
+                         TRUE ~ "other"),
+           group=paste0(condition,"_")) %>%
+  filter(coverage>=10000,
+         )
+
+```
+
+```{r}
+# Summary table: mean RMS and SEM per position and condition
+rms_summary <- merged_data %>%
+  group_by(chrom, position, ID, status, condition, aseD, aseDp) %>%
+  summarise(
+    mean_rms = mean(RMS, na.rm = TRUE),
+    se_rms   = sd(RMS, na.rm = TRUE) / sqrt(n()),
+    n        = n(),
+    .groups  = "drop"
+  ) 
+
+# Pivot wider so CTL and KD are separate columns for scatter plot
+rms_wide <- rms_summary %>%
+  tidyr::pivot_wider(
+    id_cols     = c(position, ID, status, aseD, aseDp),
+    names_from  = condition,
+    values_from = c(mean_rms, se_rms)
+  )
+
+rms_Nm <- rms_wide %>%
+  filter(status=='known Nm') 
+
+
+
+# Scatter plot CTL vs KD with error bars
+ggplot(rms_Nm,
+       aes(x     = mean_rms_CTL,
+           y     = mean_rms_KD,
+           color = status)) +
+  geom_point(size = 1.5) +
+  geom_errorbar(
+    aes(ymin = mean_rms_KD - se_rms_KD,
+        ymax = mean_rms_KD + se_rms_KD),
+    width   = 0,
+    alpha   = 0.4
+  ) +
+  geom_errorbarh(
+    aes(xmin = mean_rms_CTL - se_rms_CTL,
+        xmax = mean_rms_CTL + se_rms_CTL),
+    height  = 0,
+    alpha   = 0.4
+  ) +
+  geom_abline(slope     = 1,
+              intercept = 0,
+              linetype  = "dashed",
+              color     = "grey50") +   # identity line
+  labs(
+    x     = "CTL mean RMS",
+    y     = "KD mean RMS",
+    color = "Status",
+    title = "CTL vs KD RMS Score by Position"
+  ) 
+
+```
+
+```{r}
+merged_Nm<- merged_data %>%
+  mutate(sampleFull=paste(condition,tissue,sampleid,sep='_')) %>%
+  filter(status=='known Nm') %>%
+  mutate(
+    condition  = factor(condition, levels = c("KD", "DEL", "CTL")),
+    sampleFull = fct_reorder(sampleFull, as.numeric(condition))
+  )
+
+ggplot(merged_Nm,
+       aes(x    = factor(position),
+           y    = sampleFull,
+           fill = RMS)) +
+  geom_tile() +
+  scale_fill_gradient2(
+    low     = "blue",
+    mid     = "white",
+    high    = "red",
+    midpoint = 0.5
+  ) +
+  facet_wrap(~ tissue, ncol = 1, scales = "free_y") +
+  labs(
+    x    = "45S rRNA pos: known Nm",
+    y    = "Sample",
+    fill = "RMS Score",
+    title = "RMS Score by Position and Sample"
+  ) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size=4))
+```
+Distance to ASED
+
+```{r}
+merged_aseD<- merged_data %>%
+  mutate(sampleFull=paste(condition,tissue,sampleid,sep='_')) %>%
+  filter(ASE_status=='aseD') %>%
+  mutate(
+    condition  = factor(condition, levels = c("KD", "DEL", "CTL")),
+    sampleFull = fct_reorder(sampleFull, as.numeric(condition))
+  )
+
+ggplot(merged_aseD,
+       aes(x    = factor(position),
+           y    = sampleFull,
+           fill = RMS)) +
+  geom_tile() +
+  scale_fill_gradient2(
+    low     = "blue",
+    mid     = "white",
+    high    = "red",
+    midpoint = 0.5
+  ) +
+  facet_wrap(~ tissue, ncol = 1, scales = "free_y") +
+  labs(
+    x    = "45S rRNA pos: known Nm",
+    y    = "Sample",
+    fill = "RMS Score",
+    title = "RMS Score by Position and Sample"
+  ) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size=4))
+```
+
+## ASE=Dp
+```{r}
+merged_aseDp<- merged_data %>%
+  mutate(sampleFull=paste(condition,tissue,sampleid,sep='_')) %>%
+  filter(ASE_status=='aseDp') %>%
+  mutate(
+    condition  = factor(condition, levels = c("KD", "DEL", "CTL")),
+    sampleFull = fct_reorder(sampleFull, as.numeric(condition))
+  )
+
+ggplot(merged_aseDp,
+       aes(x    = factor(position),
+           y    = sampleFull,
+           fill = RMS)) +
+  geom_tile() +
+  scale_fill_gradient2(
+    low     = "blue",
+    mid     = "white",
+    high    = "red",
+    midpoint = 0.5
+  ) +
+  facet_wrap(~ tissue, ncol = 1, scales = "free_y") +
+  labs(
+    x    = "45S rRNA pos: ase-dp",
+    y    = "Sample",
+    fill = "RMS Score",
+    title = "RMS Score by Position and Sample"
+  ) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size=4))
+```
+
+
+```{r}
+
+aseDp_summary <- merged_aseDp %>%
+  filter(tissue=='CTX') %>%
+  group_by(chrom, position, ID, status, condition) %>%
+  summarise(
+    mean_rms = mean(RMS, na.rm = TRUE),
+    se_rms   = sd(RMS, na.rm = TRUE) / sqrt(n()),
+    n        = n(),
+    .groups  = "drop"
+  ) 
+
+# Pivot wider so CTL and KD are separate columns for scatter plot
+dp_wide <- aseDp_summary %>%
+  tidyr::pivot_wider(
+    id_cols     = c(position, ID, status),
+    names_from  = condition,
+    values_from = c(mean_rms, se_rms)
+  )
+
+
+ggplot(dp_wide,
+       aes(x     = mean_rms_CTL,
+           y     = mean_rms_DEL,
+           color = status)) +
+  geom_point(size = 1.5) +
+  geom_errorbar(
+    aes(ymin = mean_rms_DEL - se_rms_DEL,
+        ymax = mean_rms_DEL + se_rms_DEL),
+    width   = 0,
+    alpha   = 0.4
+  ) +
+  geom_errorbarh(
+    aes(xmin = mean_rms_CTL - se_rms_CTL,
+        xmax = mean_rms_CTL + se_rms_CTL),
+    height  = 0,
+    alpha   = 0.4
+  ) +
+  geom_abline(slope     = 1,
+              intercept = 0,
+              linetype  = "dashed",
+              color     = "grey50") +   # identity line
+  labs(
+    x     = "CTL mean RMS",
+    y     = "KD mean RMS",
+    color = "Status",
+    title = "CTL vs KD RMS Score by Position"
+  ) 
+```
+
+```{r}
+aseD_summary <- merged_aseD %>%
+  filter(tissue=='CTX') %>%
+  group_by(chrom, position, ID, status, condition) %>%
+  summarise(
+    mean_rms = mean(RMS, na.rm = TRUE),
+    se_rms   = sd(RMS, na.rm = TRUE) / sqrt(n()),
+    n        = n(),
+    .groups  = "drop"
+  ) 
+
+# Pivot wider so CTL and KD are separate columns for scatter plot
+d_wide <- aseD_summary %>%
+  tidyr::pivot_wider(
+    id_cols     = c(position, ID, status),
+    names_from  = condition,
+    values_from = c(mean_rms, se_rms)
+  )
+
+
+ggplot(d_wide,
+       aes(x     = mean_rms_CTL,
+           y     = mean_rms_DEL,
+           color = status)) +
+  geom_point(size = 1.5) +
+  geom_errorbar(
+    aes(ymin = mean_rms_DEL - se_rms_DEL,
+        ymax = mean_rms_DEL + se_rms_DEL),
+    width   = 0,
+    alpha   = 0.4
+  ) +
+  geom_errorbarh(
+    aes(xmin = mean_rms_CTL - se_rms_CTL,
+        xmax = mean_rms_CTL + se_rms_CTL),
+    height  = 0,
+    alpha   = 0.4
+  ) +
+  geom_abline(slope     = 1,
+              intercept = 0,
+              linetype  = "dashed",
+              color     = "grey50") +   # identity line
+  labs(
+    x     = "CTL mean RMS",
+    y     = "KD mean RMS",
+    color = "Status",
+    title = "CTL vs KD RMS Score by Position"
+  ) 
+```
+
+# Nm and ase sites on one plot
+```{r}
+all_summary <- merged_data %>%
+  filter(site_status != 'other') %>%
+  mutate(group=paste0(condition,"_",tissue)) %>%
+  group_by(chrom, position, ID, site_status, group) %>%
+  summarise(
+    mean_rms = mean(RMS, na.rm = TRUE),
+    se_rms   = sd(RMS, na.rm = TRUE) / sqrt(n()),
+    n        = n(),
+    .groups  = "drop"
+  ) 
+
+# Pivot wider so CTL and KD are separate columns for scatter plot
+wide <- all_summary %>%
+  tidyr::pivot_wider(
+    id_cols     = c(position, ID, site_status),
+    names_from  = group,
+    values_from = c(mean_rms, se_rms)
+  )
+
+
+ggplot(wide,
+       aes(x     = mean_rms_CTL_CTX,
+           y     = mean_rms_DEL_CTX,
+           color = site_status)) +
+  geom_point(size = 1.5) +
+  geom_errorbar(
+    aes(ymin = mean_rms_DEL_CTX - se_rms_DEL_CTX,
+        ymax = mean_rms_DEL_CTX + se_rms_DEL_CTX),
+    width   = 0,
+    alpha   = 0.4
+  ) +
+  geom_errorbarh(
+    aes(xmin = mean_rms_CTL_CTX - se_rms_CTL_CTX,
+        xmax = mean_rms_CTL_CTX + se_rms_CTL_CTX),
+    height  = 0,
+    alpha   = 0.4
+  ) +
+  geom_abline(slope     = 1,
+              intercept = 0,
+              linetype  = "dashed",
+              color     = "grey50") +   # identity line
+  labs(
+    x     = "CTL mean RMS",
+    y     = "DEL mean RMS",
+    color = "Status",
+    title = "CTL vs DEL cortex"
+  ) 
+
+
+```
+
+# Counts
+```{r}
+aseD<-all_summary%>%
+  filter(site_status=='aseD',
+         mean_rms>=0.5,
+         group=='CTL_iN')
+
+
+
+```
+
+
+
+
+
+```{r}
+ggplot(filter(wide,site_status=='aseD'),
+       aes(x     = mean_rms_CTL_iN,
+           y     = mean_rms_KD_iN,
+           color = site_status)) +
+  geom_point(size = 1.5) +
+  geom_errorbar(
+    aes(ymin = mean_rms_KD_iN - se_rms_KD_iN,
+        ymax = mean_rms_KD_iN + se_rms_KD_iN),
+    width   = 0,
+    alpha   = 0.4
+  ) +
+  geom_errorbarh(
+    aes(xmin = mean_rms_CTL_iN - se_rms_CTL_iN,
+        xmax = mean_rms_CTL_iN + se_rms_CTL_iN),
+    height  = 0,
+    alpha   = 0.4
+  ) +
+  geom_vline(xintercept=0.5) + geom_hline(yintercept=0.5) +
+  labs(
+    x     = "CTL mean RMS",
+    y     = "KD mean RMS",
+    color = "Status",
+    title = "CTL vs KD iN"
+  ) 
+
+```
+```{r}
+ggplot(wide,
+       aes(x     = mean_rms_CTL_HYPO,
+           y     = mean_rms_DEL_HYPO,
+           color = site_status)) +
+  geom_point(size = 1.5) +
+  geom_errorbar(
+    aes(ymin = mean_rms_DEL_HYPO - se_rms_DEL_HYPO,
+        ymax = mean_rms_DEL_HYPO + se_rms_DEL_HYPO),
+    width   = 0,
+    alpha   = 0.4
+  ) +
+  geom_errorbarh(
+    aes(xmin = mean_rms_CTL_HYPO - se_rms_CTL_HYPO,
+        xmax = mean_rms_CTL_HYPO + se_rms_CTL_HYPO),
+    height  = 0,
+    alpha   = 0.4
+  ) +
+  geom_abline(slope     = 1,
+              intercept = 0,
+              linetype  = "dashed",
+              color     = "grey50") +   # identity line
+  labs(
+    x     = "CTL mean RMS",
+    y     = "DEL mean RMS",
+    color = "Status",
+    title = "CTL vs DEL hypo"
+  ) 
+```
+
+# Nm sites cortex vs. iNs
+
+```{r}
+wide_nm <- wide %>% filter(site_status=='Nm') 
+
+countCtx<-nrow(filter(wide_nm,mean_rms_CTL_CTX>=0.5))
+countNeuron<-nrow(filter(wide_nm,mean_rms_CTL_iN>=0.5))
+
+ggplot(wide_nm,
+       aes(x     = mean_rms_CTL_CTX,
+           y     = mean_rms_CTL_iN,
+           color = site_status)) +
+  geom_point(size = 1.5) +
+  geom_errorbar(
+    aes(ymin = mean_rms_CTL_iN - se_rms_CTL_iN,
+        ymax = mean_rms_CTL_iN + se_rms_CTL_iN),
+    width   = 0,
+    alpha   = 0.4
+  ) +
+  geom_errorbarh(
+    aes(xmin = mean_rms_CTL_CTX - se_rms_CTL_CTX,
+        xmax = mean_rms_CTL_CTX + se_rms_CTL_CTX),
+    height  = 0,
+    alpha   = 0.4
+  ) +
+  geom_vline(xintercept=0.5) + geom_hline(yintercept=0.5)+
+  labs(
+    x     = "CTL ctx mean RMS",
+    y     = "CTL iN mean RMS",
+    color = "Status")
+
+
+```
+```{r}
+wide_aseD<-filter(wide,site_status=='aseD')
+ggplot(wide_aseD,
+       aes(x     = mean_rms_CTL_CTX,
+           y     = mean_rms_CTL_iN,
+           color = site_status)) +
+  geom_point(size = 1.5) +
+  geom_errorbar(
+    aes(ymin = mean_rms_CTL_iN - se_rms_CTL_iN,
+        ymax = mean_rms_CTL_iN + se_rms_CTL_iN),
+    width   = 0,
+    alpha   = 0.4
+  ) +
+  geom_errorbarh(
+    aes(xmin = mean_rms_CTL_CTX - se_rms_CTL_CTX,
+        xmax = mean_rms_CTL_CTX + se_rms_CTL_CTX),
+    height  = 0,
+    alpha   = 0.4
+  ) +
+  geom_vline(xintercept=0.5) + geom_hline(yintercept=0.5)+
+  labs(
+    x     = "CTL ctx mean RMS",
+    y     = "CTL iN mean RMS",
+    color = "Status")
+
+```
+```{r}
+wide_aseDp<-filter(wide,site_status=='aseDp')
+ggplot(wide_aseDp0,
+       aes(x     = mean_rms_CTL_CTX,
+           y     = mean_rms_CTL_iN,
+           color = site_status)) +
+  geom_point(size = 1.5) +
+  geom_errorbar(
+    aes(ymin = mean_rms_CTL_iN - se_rms_CTL_iN,
+        ymax = mean_rms_CTL_iN + se_rms_CTL_iN),
+    width   = 0,
+    alpha   = 0.4
+  ) +
+  geom_errorbarh(
+    aes(xmin = mean_rms_CTL_CTX - se_rms_CTL_CTX,
+        xmax = mean_rms_CTL_CTX + se_rms_CTL_CTX),
+    height  = 0,
+    alpha   = 0.4
+  ) +
+  geom_vline(xintercept=0.5) + geom_hline(yintercept=0.5)+
+  labs(
+    x     = "CTL ctx mean RMS",
+    y     = "CTL iN mean RMS",
+    color = "Status")
+
+```
+

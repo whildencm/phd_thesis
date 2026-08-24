@@ -1,0 +1,25 @@
+# RMS analysis
+
+I copied the config file, samples file, and profile examples from PIPELINE/ribomethseq and filled in w/ sample info.
+
+Dry run
+```
+module load Mambaforge
+mamba activate /n/whipple_lab/share_root/Users/cwhilden/ENVS/snakemake_py311
+snake=/n/whipple_lab/share_root/Users/cwhilden/PIPELINE/ribomethseq/RMS.smk
+
+cd /n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2_RMS/
+snakemake \
+  --snakefile $snake \
+  --configfile config.yaml \
+  --dryrun
+
+```
+Dry run indicates 189 jobs needed. updated profile file.
+
+Run:
+```
+snakemake --profile profiles/whipple-slurm \
+  --snakefile $snake \
+  --configfile config.yaml
+```

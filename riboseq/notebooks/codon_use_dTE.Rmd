@@ -1,0 +1,341 @@
+---
+title: "codon_use_dTE.Rmd"
+author: "Courtney Whilden"
+date: "2026-08-13"
+output: html_document
+---
+
+```{r}
+# LOAD PACKAGES -----------------------------------------
+library(seqinr)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(tidyverse)
+library(pheatmap)
+library(ggrepel)
+library(stringr)
+library(generics)
+
+
+#DIRECTORIES -----------------------------------------------------------------
+tsl_dir <- "/Volumes/whipple_lab/Users/cwhilden/PROJECTS/manuscript_2026/riboseq/results/TE"
+rna_dir <- "/Volumes/whipple_lab/Users/cwhilden/PROJECTS/manuscript_2026/riboseq/results/TE"
+input_dir <- "/Volumes/whipple_lab/Users/cwhilden/PROJECTS/manuscript_2026/riboseq/results/codon_scores"
+
+output_dir <- "/Volumes/whipple_lab/Users/cwhilden/PROJECTS/manuscript_2026/riboseq/results/codon_usage_dTE"
+dir.create(output_dir, recursive = TRUE)
+```
+
+```{r}
+# READ IN FILES ----------------------------------------------------------------
+
+# Import codon usage scores for each gene
+usage_long <- read.csv(file.path(input_dir,"Codon_Usage_AllGenes.csv"))
+
+tsl_results <- read.csv(file.path(tsl_dir, "P0_All_dTE_Results.csv"))
+rna_results <- read.csv(file.path(rna_dir, "P0_All_dRNA_Results.csv"))
+
+# ID up, down, and no change genes  --------------------------------------------
+
+gen_gene_lists <- function(results) {
+  up <- filter(results, padj<0.1 & log2FoldChange>0)
+  down <- filter(results, padj<0.1 & log2FoldChange<0)
+  no_change <- filter(results, padj>=0.1)
+  
+  return(list(up=up$X,
+              down=down$X,
+              no_change=no_change$X)) 
+}
+
+tsl_lists <- gen_gene_lists(tsl_results)
+rna_lists <- gen_gene_lists(rna_results)
+
+
+# LABEL genes by status, extract codon usage info ------------------------------
+
+filter_genes <- function(data,
+                         genes) {
+  
+  filtered <- data %>%
+    filter(gene %in% c(genes$up, genes$down, genes$no_change)) %>%
+    mutate(Set=case_when(
+      gene %in% genes$up ~ "Up",
+      gene %in% genes$down ~ "Down",
+      TRUE ~ "NoChange"
+    ) %>% factor(levels = c("Down","NoChange","Up"))) 
+  
+  frequency <- filtered  %>%
+    dplyr::select(gene, codon, freq) %>%
+    pivot_wider(names_from = codon, values_from = freq, values_fill = 0) %>%
+    column_to_rownames("gene")
+  
+  annotations <- data.frame(Set = filtered %>% distinct(gene, Set) %>% pull(Set))
+  rownames(annotations) <- rownames(frequency)
+  
+  GC_content <- filtered  %>%
+    dplyr::select(gene, GC_fraction, Set)
+  GC_content$Set <- factor(GC_content$Set, levels = c("Down","NoChange","Up"))
+  
+  return(list(results = frequency,
+              sets = annotations,
+              GC = GC_content))
+  
+}
+
+tsl_codon_results <- filter_genes(usage_long,
+                                  tsl_lists)
+
+rna_codon_results <- filter_genes(usage_long,
+                                  rna_lists)
+```
+
+
+# Violin plot of GC content ----------------------------------------------------
+```{r}
+my_theme <- theme_minimal(base_size = 7) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 8, face = "bold"),
+    axis.title.x = element_text(size = 7),
+    axis.title.y = element_text(size = 7),
+    axis.text.x = element_text(size = 7),
+    axis.text.y = element_text(size = 7),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    plot.margin = margin(5, 5, 5, 5),
+    axis.ticks = element_line(),
+    aspect.ratio=1
+  )
+
+rna_violin <- ggplot(rna_codon_results$GC,
+                     aes(x= Set,
+                         y= GC_fraction,
+                         fill= Set)) +
+  geom_violin(trim=FALSE, alpha=0.7) +
+  geom_boxplot(width= 0.1, outlier.shape=NA, fill="white") +
+  labs(title = 'GC Fraction by RNA Category',
+       x="RNA Expression Category",
+       y="GC Fraction") +
+  my_theme
+
+
+ggsave(
+  filename = file.path(output_dir,"RNA_GC_Fraction_Violin.pdf"),
+  plot= rna_violin,
+  width = 2,
+  height = 2,
+  units = "in"
+)
+
+tsl_violin <- ggplot(tsl_codon_results$GC,
+                     aes(x= Set,
+                         y= GC_fraction,
+                         fill= Set)) +
+  geom_violin(trim=FALSE, alpha=0.7) +
+  geom_boxplot(width= 0.1, outlier.shape=NA, fill="white") +
+  labs(title = 'GC Fraction by TSL Category',
+       x="TSL Expression Category",
+       y="GC Fraction") + 
+  my_theme
+
+ggsave(
+  filename = file.path(output_dir,"RPF_GC_Fraction_Violin.pdf"),
+  plot= tsl_violin,
+  width = 2,
+  height = 2,
+  units = "in"
+)
+```
+
+
+# ID significant codons --------------------------------------------------------
+```{r}
+
+
+sig_codons <- function(data){
+  freq_long <- data$results %>%
+    rownames_to_column(var="gene") %>%
+    pivot_longer(cols = -gene,
+                 names_to = "codon",
+                 values_to = "frequency")
+  
+  annot <- data$sets %>%
+    rownames_to_column(var="gene")
+  
+  freq_annot <- freq_long %>%
+    left_join(
+      annot, by="gene"
+    )
+  
+  freq_results <- freq_annot %>%
+    group_by(codon,Set) %>%
+    summarise(
+      mean_freq = mean(frequency, na.rm=TRUE),
+      se_freq = sd(frequency, na.rm = TRUE) / sqrt(n()),
+      n = n(),
+      .groups = "drop"
+    )
+  
+  codon_stats <- freq_annot %>%
+    group_by(codon) %>%
+    summarise(
+      p_value = kruskal.test(frequency ~ Set)$p.value,
+      .groups = "drop"
+    )
+  
+  codon_stats <- codon_stats %>%
+    mutate(padj = p.adjust(p_value, method = "fdr"))
+  
+  freq_results <- left_join(freq_results, codon_stats, by = "codon")
+  
+  freq_results <- freq_results %>%
+    mutate(
+      GC_percent = str_count(codon, "[GCgc]") / 3 * 100
+    )
+  
+  df_wide <- freq_results %>%
+    dplyr::select(codon, Set, mean_freq, se_freq) %>%
+    pivot_wider(
+      names_from  = Set,
+      values_from = c(mean_freq, se_freq)
+    ) 
+  
+  df_wide <- df_wide %>%
+    dplyr::rename(
+      up_mean       = mean_freq_Up,
+      down_mean     = mean_freq_Down,
+      nochange_mean = mean_freq_NoChange,
+      up_se         = se_freq_Up,
+      down_se       = se_freq_Down,
+      nochange_se   = se_freq_NoChange
+    )
+  
+  # 2. make a codon→GC lookup (one row per codon)
+  gc_lookup <- freq_results %>%
+    dplyr::select(codon, GC_percent) %>%
+    distinct()
+  
+  pvalue_lookup <- freq_results %>%
+    dplyr::select(codon,padj) %>%
+    distinct()
+  
+  # 3. join it on
+  df_wide2 <- df_wide %>%
+    left_join(gc_lookup, by = "codon")
+  
+  df_wide3 <- df_wide2 %>%
+    left_join(pvalue_lookup, by = "codon")
+  
+  return(list(res_long=freq_results,
+              res_wide=df_wide3))
+  
+}
+
+
+tsl_sig_codons <- sig_codons(tsl_codon_results) 
+rna_sig_codons <- sig_codons(rna_codon_results) 
+
+write.csv(tsl_sig_codons$res_long,file.path(output_dir,"TSL_SigCodons_Long.csv"))
+write.csv(tsl_sig_codons$res_wide,file.path(output_dir,"TSL_SigCodons_Wide.csv"))
+write.csv(rna_sig_codons$res_long,file.path(output_dir,"RNA_SigCodons_Long.csv"))
+write.csv(rna_sig_codons$res_wide,file.path(output_dir,"RNA_SigCodons_Wide.csv"))
+
+```
+
+
+# Scatter plots, colored by GC content
+```{r}
+
+rna_scatter <- ggplot(rna_sig_codons$res_wide, 
+                      aes(x = down_mean, y = up_mean, color = GC_percent)) +
+  geom_point(size = 2) +
+  geom_text_repel(
+    data = subset(rna_sig_codons$res_wide, padj < 0.1),
+    aes(label = codon),
+    size = 3,
+    box.padding = 0.3,
+    point.padding = 0.2,
+    segment.color = "grey60",
+    max.overlaps=Inf
+  ) +
+  scale_color_viridis_c(option = "D", name = "GC %") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey50") +
+  labs(
+    x = "Median Codon Frequency (RNA Downregulated)",
+    y = "Median Codon Frequency (RNA Upregulated)"
+  ) + my_theme
+
+ggsave(
+  filename = file.path(output_dir,"RNA_CodonFreq_Scatter_Color_GC.pdf"),
+  plot= rna_scatter,
+  width = 4,
+  height = 4,
+  units = "in"
+)
+
+tsl_scatter <- ggplot(tsl_sig_codons$res_wide, 
+                      aes(x = down_mean, y = up_mean, color = GC_percent)) +
+  geom_point(size = 2) +
+  geom_text_repel(
+    data = subset(tsl_sig_codons$res_wide, padj < 0.1),
+    aes(label = codon),
+    size = 3,
+    box.padding = 0.3,
+    point.padding = 0.2,
+    segment.color = "grey60",
+    max.overlaps=Inf
+  ) +
+  scale_color_viridis_c(option = "D", name = "GC %") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey50") +
+  labs(
+    x = "Median Codon Frequency (TSL Downregulated)",
+    y = "Median Codon Frequency (TSL Upregulated)"
+  ) + my_theme
+
+ggsave(
+  filename = file.path(output_dir,"TSL_CodonFreq_Scatter_Color_GC.pdf"),
+  plot= tsl_scatter,
+  width = 4,
+  height = 4,
+  units = "in"
+)
+
+```
+
+
+```{r}
+###### INDIVIDUAL CODON VIOLIN PLOTS #########
+
+plot_significant_codon_violins <- function(freq_long, sig_codons, out_dir, prefix="") {
+  # Get only codons with padj < 0.1
+  sig_codon_list <- sig_codons$res_wide %>%
+    filter(padj < 0.1) %>%
+    pull(codon)
+  
+  # Loop through each significant codon and plot
+  for (codon in sig_codon_list) {
+    dat <- freq_long %>% filter(codon == !!codon)
+    if(nrow(dat) == 0) next
+    
+    plt <- ggplot(dat, aes(x=Set, y=frequency, fill=Set)) +
+      geom_violin(trim=FALSE, alpha=0.7) +
+      geom_boxplot(width=0.1, outlier.shape=NA, fill="white") +
+      labs(title = paste("Codon:", codon),
+           x = "Gene Category",
+           y = "Codon Frequency") +
+      my_theme
+    
+    # Output filename
+    fname <- file.path(out_dir, paste0(prefix, "CodonFreq_Violin_", codon, ".pdf"))
+    ggsave(filename = fname, plot = plt, width = 2, height = 2, units = "in")
+  }
+}
+
+tsl_freq_long <- tsl_codon_results$results %>%
+  rownames_to_column(var="gene") %>%
+  pivot_longer(cols = -gene, names_to = "codon", values_to = "frequency") %>%
+  left_join(tsl_codon_results$sets %>% rownames_to_column(var="gene"), by = "gene")
+
+plot_significant_codon_violins(tsl_freq_long, tsl_sig_codons, output_dir, prefix="TSL_")
+```
+

@@ -1,0 +1,36 @@
+# config.yaml
+
+#----
+# Input / Output
+#----
+# Text file with one absolute path to a .fastq.gz / .fq.gz file per line
+sampleSheet: "config/eclip_samples.txt"
+
+# Root directory for all outputs
+outputDir: "results/eCLIP"
+
+#----
+# Genome 1: one representative copy of repeated sequences
+# (all other copies hard-masked)
+#----
+genomeOneCopy:      "/n/whipple_lab/share_root/Users/cwhilden/PIPELINE/chimeCLIP_ref/mm39_snoMask_oneCopy/maskCoord_oneCopy.fa"
+genomeIndexOneCopy: "/n/whipple_lab/share_root/Users/cwhilden/PIPELINE/chimeCLIP_ref/mm39_snoMask_oneCopy/star_index20260317"
+
+#----
+# Genome 2: one copy of each unique sequence variant
+# (non-unique copies hard-masked)
+#----
+genomeUnique:      "/n/whipple_lab/share_root/Users/cwhilden/PIPELINE/chimeCLIP_ref/mm39_snoMask_uniqueSno/maskCoord_uniqueSno.fa"
+genomeIndexUnique: "/n/whipple_lab/share_root/Users/cwhilden/PIPELINE/chimeCLIP_ref/mm39_snoMask_uniqueSno/star_index20260317"
+
+#----
+# Annotation
+#----
+gtf: "/n/whipple_lab/share_root/Users/cwhilden/PIPELINE/chimeCLIP_ref/mm39/gencode.vM38.primary_assembly.annotation.gtf"
+
+#----
+# Read length
+# sjdbOverhang = readLength - 1
+# Set to the actual read length of your experiment
+#----
+readLength: 150

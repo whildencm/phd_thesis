@@ -1,0 +1,14 @@
+# Sample info text file (tab-delimited; sample \t r1 \t r2)
+sampleInfo: "/n/whipple_lab/share_root/Users/cwhilden/DEV/rms_test/samples_test.txt"
+
+# Results output directory
+outputDir: "/n/whipple_lab/share_root/Users/cwhilden/DEV/rms_test"
+
+# Genomes to map against (keys become the {genome} wildcard)
+genomes:
+  rRNA:
+    fasta: "references/rRNA.fa"
+  snRNA:
+    fasta: "references/snRNA.fa"
+  scaRNA:
+    fasta: "references/scaRNA.fa"

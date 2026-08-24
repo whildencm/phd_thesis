@@ -1,0 +1,33 @@
+# ================
+# SAMPLE INFORMATION
+# ================
+
+# IP samples that will run through the chimera mapping pipelines
+IP_samples: "config/samples_IP.txt"
+
+# Input samples that will run through the clip mapping pipeline for peak normalization
+IN_samples: "config/samples_IN.txt"
+
+# Output directory: where all results should go. subfolders will be created automatically
+outputDir: "/n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2/results"
+
+# Maximum read length in libraries. Needed to set overhang in STAR mapping.
+readLength: 150
+
+# ================
+# REFERENCE FILES
+# ================
+snoRNAFasta: "references/snoMasterv5_chimeCLIP.fa"
+adapterFasta: "references/se.adapters.fasta"
+
+rRNAFasta: "references/rRNA.fa"
+scaRNAFasta: "references/scaRNA.fa"
+snRNAFasta: "references/snRNA.fa"
+tRNAFasta: "references/tRNA.fa"
+
+genomeFasta: "references/GRCm39.masked.fa"
+genomeIndexDir: "references/star_index"
+genomeGTF: "references/gencode.vM38.primary_assembly.annotation.gtf"
+
+# Path to scripts folder within chimeric snakemake pipeline
+scriptDir: "scripts/chimeric_snakemake/scripts"

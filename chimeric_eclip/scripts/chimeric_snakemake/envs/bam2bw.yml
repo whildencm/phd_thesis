@@ -1,0 +1,13 @@
+name: bam2bw
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - samtools
+  - bedtools
+  - ucsc-bedgraphtobigwig
+  - pysam
+  - pip
+  - pip:
+    - cmder
+    - seqflow

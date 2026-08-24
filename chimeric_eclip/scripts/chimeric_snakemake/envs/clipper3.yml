@@ -1,0 +1,18 @@
+name: clipper3
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.7.7
+  - bedtools=2.29.2
+  - htseq=0.11.3
+  - samtools=1.7
+  - numpy
+  - pandas
+  - pybedtools
+  - pysam
+  - scikit-learn
+  - scipy
+  - matplotlib
+  - cython
+  - pip

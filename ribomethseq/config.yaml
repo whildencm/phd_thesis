@@ -1,0 +1,14 @@
+# Sample info text file (tab-delimited; sample \t r1 \t r2)
+sampleInfo: "samples.txt"
+
+# Results output directory
+outputDir: "results"
+
+# Genomes to map against (keys become the {genome} wildcard)
+genomes:
+  rRNA:
+    fasta: "/n/whipple_lab/share_root/Users/cwhilden/PIPELINE/chimeCLIP_ref/repGenomes_mmu/rRNA.fa"
+  snRNA:
+    fasta: "/n/whipple_lab/share_root/Users/cwhilden/PIPELINE/chimeCLIP_ref/repGenomes_mmu/snRNA.fa"
+  scaRNA:
+    fasta: "/n/whipple_lab/share_root/Users/cwhilden/PIPELINE/chimeCLIP_ref/repGenomes_mmu/scaRNA.fa"

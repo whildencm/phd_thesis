@@ -1,0 +1,373 @@
+---
+title: "Nm_snoRNAs_peakCalling_Analyses.Rmd"
+author: "Courtney Whilden"
+date: "2026-03-12"
+output: html_document
+---
+```{r}
+# Project directory
+clusterRoot <- "/n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2"
+macRoot     <- "/Volumes/whipple_lab/Users/cwhilden/PROJECTS/THESIS/chapter2"
+
+library(tidyverse, quietly=TRUE)
+library(ggplot2, quietly=TRUE)
+library(tools, quietly=TRUE)
+library(ggrepel, quietly=TRUE)
+library(pROC, quietly=TRUE)
+
+
+# PLOT THEME
+paletteCW <- c(
+  Pink_CW      = "#EC008C",
+  Teal_CW      = "#008C8C",
+  Charcoal_CW  = "#2E2E2E",
+  LimeGreen_CW = "#9BC53D",
+  SoftOrange_CW= "#F4A261",
+  Purple_CW    = "#7B2CBF"
+)
+
+themeCW <- function(baseSize = 6) {
+  theme_minimal(base_size = baseSize) %+replace%
+    theme(
+      # panel
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(fill = NA, colour = "black", size = 0.5),
+      
+      # axes lines/ticks/text
+      axis.line = element_blank(),                      # border handles the visual frame
+      axis.ticks = element_line(size = 0.5),
+      axis.ticks.length = unit(0.03, "in"),
+      axis.text = element_text(size = baseSize, colour = "black"),
+      axis.title = element_text(size = baseSize, colour = "black"),
+      
+      # legend
+      legend.key        = element_blank(),
+      legend.background = element_blank(),
+      legend.text       = element_text(size = baseSize),
+      legend.title = element_blank(),
+      
+      legend.key.size   = unit(0.2, "cm"),
+      legend.spacing.y  = unit(1, "pt"),
+      legend.margin     = margin(0, 0, 0, 0, unit = "pt"),
+      legend.position = "top",
+      
+      # plot text & margins
+      plot.title = element_text(size = baseSize, colour = "black"),
+      plot.subtitle = element_text(size = baseSize, colour = "black"),
+      plot.margin = margin(5, 5, 5, 5, unit = "pt"),
+      
+      aspect.ratio=1
+    )
+}
+
+
+######################################
+# Function to save plots in my preferred size
+plotSave <- function(plotVar, fileName, outSave=outDir){
+  ggsave(
+  filename = file.path(outSave,fileName),
+  plot = plotVar,
+  device = "pdf",
+  width = 1.5,
+  height = 1.5,
+  units = "in"
+  )
+}
+```
+
+## PEAK CALLING Nm-snoRNAs
+Input data: summaryFiles/peakSummaryFiles
+
+### Plot the fraction of chimeras in peak between replicates and perform ROC
+
+```{r}
+# Data import
+data_repA <- read_csv(file.path(macRoot,"summaryFiles/peakSummaryFiles/SSEXPT8_IP_A_S3_R1_001_Significant_Peak_Results.csv"))
+data_repB <- read_csv(file.path(macRoot,"summaryFiles/peakSummaryFiles/SSEXPT8_IP_B_S4_R1_001_Significant_Peak_Results.csv"))
+# Read in Nm snoRNA annotation file
+
+Nm <- read_csv(file.path(macRoot,"references/Known_Nm_snoRNAs.csv"))
+
+
+```
+
+
+```{r}
+# Add peak ID containing snoRNA name and peak coordinates
+addPeakID <- function(data) {
+  
+  data$peakID <- paste0(data$snoRNA,";",data$chromosome,"_",data$start,"_",data$end)
+  
+  return(data)
+  
+}
+
+data_repA <- addPeakID(data_repA)
+data_repB <- addPeakID(data_repB)
+
+# Filter to peakID and fraction values
+filterData <- function(data) {
+  
+  data2 <- data %>%
+    select(all_of(c("peakID","fraction","log2_fold_change")))
+  
+  return(data2) 
+  
+}
+
+A_filter <- filterData(data_repA)
+colnames(A_filter)[2]<-"fracRepA"
+colnames(A_filter)[3]<-"l2fcA"
+
+B_filter <- filterData(data_repB)
+colnames(B_filter)[2]<-"fracRepB"
+colnames(B_filter)[3]<-"l2fcB"
+
+# Join replicates into one data frame
+data_join <- left_join(A_filter, B_filter, by='peakID')
+
+data_join[is.na(data_join)] <- 0
+
+# Annotate peaks as known or unknown
+peakStatus <- select(data_repA,(all_of(c("peakID","peakStatus"))))
+
+data_join <- left_join(data_join,peakStatus,by="peakID") %>% 
+  mutate(avg_l2fc=(l2fcA+l2fcB)/2,
+         avg_frac=(fracRepA+fracRepB)/2,
+         # Add Nm-snoRNA annotations to pick out true positives and false positives
+         is_nm = ifelse(sub(";.*", "", peakID) %in% Nm$SNO, "Nm", "not")
+         ) 
+```
+
+### Fraction in peak, replicates
+```{r}
+cor_val_frac <- cor(
+  data_join$fracRepA,
+  data_join$fracRepB,
+  use = "complete.obs",
+  method = "pearson"
+)
+
+# Plot 
+plot<-ggplot(data_join, aes(x = fracRepA, y = fracRepB, color = peakStatus)) +
+  geom_point(alpha = 0.8, size = 1.5) +
+  annotate("text",
+           x = Inf, y = -Inf,
+           hjust = 1.1, vjust = -0.5,
+           label = paste0("r = ", round(cor_val_frac, 3)),
+           size = 6 / .pt,
+           colour = "black") +
+  
+  scale_color_manual(
+    values = c(
+      known = "#008C8C",
+      other = "#2E2E2E"
+    )
+  ) +
+  
+  labs(
+    x = "Fraction of chimeras in peak (Rep A)",
+    y = "Fraction of chimeras in peak (Rep B)"
+  ) +
+  geom_vline(xintercept=0.1) +
+  geom_hline(yintercept=0.1) +
+  themeCW()
+
+outDir=file.path(macRoot,"plots/Nm-snoRNAs")
+
+plotSave(plot,"FractionChimeras_RepA_v_RepB.pdf")
+
+```
+
+### ROC to check accuracy of fraction threshold
+True positives = Nm-snoRNA peaks overlapping with a known Nm-snoRNA interaction
+False = Nm-snoRNA peaks NOT overlapping a known Nm-snoRNA interaction
+  Overlapping = Nm site is within the start and end coordinates of the peak
+  
+```{r}
+data_Nm <- data_join %>%
+  filter(is_nm=="Nm")
+
+rocAnalysis <- roc(
+  response  = data_join$peakStatus,
+  predictor = data_join$avg_frac,
+  levels    = c("unknown", "known"),
+  direction = "<"
+)
+
+# AUC
+aucValue <- as.numeric(auc(rocAnalysis))
+
+# Point at chosen threshold (0.1)
+pt01 <- coords(
+  rocAnalysis,
+  x = 0.1,
+  input = "threshold",
+  ret = c("threshold", "specificity", "sensitivity"),
+  transpose = FALSE
+) %>% as.data.frame()
+
+# Youden-best point
+ptBest <- coords(
+  rocAnalysis,
+  x = "best",
+  best.method = "youden",
+  ret = c("threshold", "specificity", "sensitivity"),
+  transpose = FALSE
+) %>% as.data.frame()
+
+# ROC plot data (specificity / sensitivity along thresholds)
+rocDf <- coords(
+  rocAnalysis,
+  x = "all",
+  ret = c("specificity", "sensitivity", "threshold"),
+  transpose = FALSE
+) %>% as.data.frame() %>%
+  mutate(fpr = 1 - specificity)
+
+# Plot
+pRoc <- ggplot(rocDf, aes(x = fpr, y = sensitivity)) +
+  geom_path(linewidth = 0.8) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  # threshold = 0.1 point
+  geom_point(
+    data = pt01 %>% mutate(fpr = 1 - specificity),
+    aes(x = fpr, y = sensitivity),
+    size = 2.2
+  ) +
+  geom_text(
+    data = pt01 %>% mutate(fpr = 1 - specificity),
+    aes(x = fpr, y = sensitivity,
+        label = paste0("t=0.1\nSe=", round(sensitivity, 2),
+                       " Sp=", round(specificity, 2))),
+    hjust = -0.05, vjust = -0.4, size = 3
+  ) +
+  # best (Youden) point
+  geom_point(
+    data = ptBest %>% mutate(fpr = 1 - specificity),
+    aes(x = fpr, y = sensitivity),
+    shape = 17, size = 2.4
+  ) +
+  geom_text(
+    data = ptBest %>% mutate(fpr = 1 - specificity),
+    aes(x = fpr, y = sensitivity,
+        label = paste0("Youden best\n t=", signif(threshold, 3))),
+    hjust = -0.05, vjust = 1.2, size = 3
+  ) +
+  coord_equal() +
+  labs(
+    x = "False positive rate (1 - specificity)",
+    y = "True positive rate (sensitivity)",
+    title = paste0("ROC: fraction in peak (AUC = ", round(aucValue, 3), ")")
+  ) +
+  themeCW()
+
+plotSave(pRoc, "ROC_Nm_sno_fraction_in_peak.pdf")
+
+pRoc
+
+```
+
+
+#### Plot fraction of chimeras vs. log2Peak Enrichment
+
+```{r}
+plot2<-ggplot(data_join, aes(x = avg_l2fc, y = avg_frac, color = peakStatus)) +
+  geom_point(alpha = 0.8, size = 1.5) +
+
+  scale_color_manual(
+    values = c(
+      known = "#008C8C",
+      other = "#2E2E2E"
+    )
+  ) +
+  
+  labs(
+    x = "log2( Peak fold enrichment) RepA",
+    y = "Fraction of chimeras in peak (Rep A)"
+  ) +
+  geom_vline(xintercept=1.5) +
+  geom_hline(yintercept=0.1) +
+  themeCW()
+
+
+
+plotSave(plot2,"FractionInPeak_v_peakEnrichment.pdf")
+
+plot2
+```
+
+### Quantify significant known interactions
+
+```{r}
+getSigPeaks <- function(data){
+  
+  data2 <- data %>%
+    filter(peakStatus=='known') %>%
+    filter(fraction>=0.1 & log2_fold_change>=1.5) %>%
+    select(all_of(c('peakID','targetClass')))
+
+}
+
+sigA <- getSigPeaks(data_repA)
+sigB <- getSigPeaks(data_repB)
+sigBoth <- intersect(sigA$peakID,sigB$peakID)
+
+sigBothData <- sigA %>%
+  filter(peakID %in% sigBoth)
+
+# Calculate total number of significant peaks
+sigPeakCount <- data.frame(TotalNm=nrow(Nm)) 
+
+Nm_byClass <- data.frame(
+  Nm_rRNA = sum(Nm$CLASS == 'rRNA'),
+  Nm_snRNA = sum(Nm$CLASS == 'snRNA'),
+  Nm_tRNA = sum(Nm$CLASS == 'tRNA'),
+  Sig_rRNA = sum(sigBothData$targetClass == 'rRNA'),
+  Sig_snRNA = sum(sigBothData$targetClass == 'snRNA'),
+  Sig_tRNA = sum(sigBothData$targetClass == 'tRNA')
+)
+
+df <- Nm_byClass[1, ]
+
+longDf <- df %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = c("type", "class"),
+    names_sep = "_"
+  ) %>%
+  pivot_wider(names_from = type, values_from = value) %>%
+  mutate(NotSig = Nm - Sig) %>%
+  select(class, Sig, NotSig) %>%
+  pivot_longer(
+    cols = c(Sig, NotSig),
+    names_to = "Significance",
+    values_to = "Count"
+  )
+
+plot5 <- ggplot(longDf, aes(x = class, y = Count, fill = Significance)) +
+  geom_bar(stat = "identity") +
+  geom_text(
+    aes(label = Count),
+    position = position_stack(vjust = 0.5),  # centres label in each stack segment
+    size = 2,
+    colour = "white"
+  ) +
+  labs(
+    x = "Target Class",
+    y = "Count",
+    fill = ""
+  ) +
+  themeCW()
+
+
+
+plotSave(plot5, "Significant_Nm_interactions_counts.pdf")
+
+plot5
+```
+
+
+

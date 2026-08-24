@@ -1,0 +1,33 @@
+executor: slurm
+jobs: 190 #8 per sample
+use-conda: true
+
+default-resources:
+  - slurm_partition=whipple
+  - slurm_account=whipple_lab
+  - runtime=300          # minutes
+  - mem_mb=16000
+
+# Per-rule overrides tuned to threads/memory needs
+set-resources:
+  index_genome:
+    mem_mb: 12000
+    threads: 8
+
+  trim_adapters:
+    mem_mb: 16000
+    threads: 8
+
+
+  map:
+    mem_mb: 24000
+    threads: 8
+
+
+  convert_files:
+    mem_mb: 16000
+    threads: 8
+
+  count_ends:
+    mem_mb: 8000
+    threads: 1

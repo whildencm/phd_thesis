@@ -1,0 +1,22 @@
+
+
+
+1. notebooks/mapping_and_QC.Rmd
+- map RPFs and RNA-seq reads
+- use ribowaltz to generate QC figures
+
+
+
+2. notebooks/translation_efficiency.Rmd
+- filter bam files for high quality read lengths
+- calculate translation efficiciency and plot
+- Output: results/TE
+
+3. notebooks/get_codon_scores.Rmd
+- generate codon use scores for protein coding genes
+- Output: results/codon_scores
+
+
+4. notebooks/codon_use_dTE_genes.Rmd
+- Generate plots for dTE genes
+- Output: results/codon_usage_dTE

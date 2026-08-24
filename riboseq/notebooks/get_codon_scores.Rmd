@@ -1,0 +1,176 @@
+---
+title: "get_codon_scores"
+author: "Courtney Whilden"
+date: "2026-08-13"
+output: html_document
+---
+# C. Whilden 2025
+# Goals:
+# 1) Parse GTF and export to csv
+# 2) Filter GTF for protein-coding genes & export to csv
+# 3) Generate file w/ coding sequences of all protein coding genes
+# 4) Calculate & export codon usage frequency & G.C content for PC genes
+
+1. Parse gtf and export to csv
+```{r}
+library(tidyverse)
+library(dplyr)
+library(Biostrings)
+library(seqinr)
+library(tidyr)
+library(tidyverse)
+library(stringr)
+
+# Path to gtf file
+gtf_path <- "/Volumes/whipple_lab/Lab/Computing_Resources/Genome_mmu/gencode.vM33.annotation.gtf"
+# Output directory
+base_dir <- "/Volumes/whipple_lab/Users/cwhilden/PROJECTS/manuscript_2026/riboseq/results/codon_scores"
+dir.create(base_dir, recursive = TRUE)
+
+gtf <- read_tsv(gtf_path, comment="#", col_names = FALSE)
+colnames(gtf) <- c("seqname", "source", "feature", "start", "end",
+                   "score", "strand", "frame", "attribute")
+
+# Filter for rows where feature is "gene"
+gtf_genes <- gtf %>% 
+  filter(feature == "gene")
+
+# Extract attributes
+gtf_genes$gene_id <- str_extract(gtf_genes$attribute, 'gene_id "([^"]+)"') %>%
+  str_replace_all('gene_id "|"','')
+
+gtf_genes$gene_type <- str_extract(gtf_genes$attribute, 'gene_type "([^"]+)"') %>%
+  str_replace_all('gene_type "|"','')
+
+gtf_clean <- gtf_genes$gene_id %>%
+  as.data.frame() 
+
+gtf_clean$gene_type <- gtf_genes$gene_type
+
+colnames(gtf_clean) <- c("gene_id", "gene_type")
+
+gtf_clean$gene_id <- gsub("\\.\\d+$", "", gtf_clean$gene_id)
+
+# Export .csv of all GENE names and types
+write.csv(gtf_clean,file.path(base_dir, "All_Genes_GTF.csv"))
+
+# Filter protein coding genes & save
+protein_coding_genes <- gtf_clean %>%
+  filter(gene_type == "protein_coding")
+
+write.csv(protein_coding_genes, file.path(base_dir, "Protein_coding_genes_GTF.csv"))
+```
+
+Get coding sequences of each gene
+```{r}
+# Path to fasta file of CDS
+# Ribominer outputs a .fa file of the CDS of the longest transcripts of each gene.
+fasta_path <- "/Volumes/whipple_lab/Users/cwhilden/cmw_expt96/config/longest_transcripts_cds_sequences.fa"
+
+# Path to .info file from RiboMiner. This will allow me to map gene IDs onto transcript IDs.
+map_path   <- "/Volumes/whipple_lab/Users/cwhilden/cmw_expt96/config/longest.transcripts.info.txt"
+
+# (1c) Create data frame of gene + sequence
+# Read in fasta file
+cds_set <- readDNAStringSet(fasta_path, format = "fasta")
+
+# Clean up transcript IDs
+trans_ids <- names(cds_set) %>%
+  sub(" .*",    "", .) %>%      # remove space+everything
+  sub("\\.\\d+$", "", .)        # remove “.8”, “.9”, etc.
+
+# Pull sequences from cds_set
+sequences <- as.character(cds_set)
+
+# Read map file, to map gene IDs onto transcript IDs
+map_df <- read_tsv(map_path, show_col_types = FALSE) %>%
+  # strip versions off the IDs here too
+  mutate(
+    trans_id = sub("\\.\\d+$", "", trans_id),
+    gene_id  = sub("\\.\\d+$", "", gene_id)
+  ) %>%
+  dplyr::select(trans_id, gene_id)
+
+# Put together into final data frame. 
+final_df <- tibble(
+  trans_id = trans_ids,
+  sequence = sequences
+) %>%
+  left_join(map_df, by = "trans_id") %>%
+  dplyr::rename(gene = gene_id) %>%
+  dplyr::select(gene, sequence) %>%
+  filter(!is.na(gene))     # drop any transcripts without a mapping
+
+# Import table of ensembl-id to gene symbol conversions
+gene_map <- read.csv(
+  "/Volumes/whipple_lab/Users/cwhilden/cmw_expt96/config/Ensembl-to-symbol.csv",
+  stringsAsFactors = FALSE
+)
+gene_label_lookup <- setNames(gene_map$Gene, gene_map$Ensembl)
+
+final_df$symbol<-gene_label_lookup[final_df$gene]
+
+# Export file
+write.csv(final_df, file.path(base_dir,"CodingSequences_AllGenes.csv"), 
+          row.names=FALSE)
+
+```
+
+Calculate codon use score for each gene using seqinr
+
+```{r}
+
+
+#Calculate codon usage for each gene using seqinr
+
+df <- read.csv(file.path(base_dir,"CodingSequences_AllGenes.csv"))
+
+
+usage_list <- lapply(seq_len(nrow(df)), function(i) {
+  gene    <- df$gene[i]
+  seq_vec <- s2c(df$sequence[i])
+  
+  uco_df <- uco(
+    seq      = seq_vec,
+    frame    = 0,
+    index    = "freq",
+    as.data.frame = TRUE,
+  )
+  
+  uco_df$gene <- gene
+  uco_df$GC_fraction <- GC(seq_vec)
+  
+  uco_df
+})
+
+
+usage_long <- bind_rows(usage_list) %>%
+  dplyr::select(gene, GC_fraction, everything())
+
+write.csv(usage_long, file.path(base_dir,"Codon_Usage_AllGenes.csv"))
+
+
+# GC per position
+codon_usage <- read_csv(file.path(base_dir,"Codon_Usage_AllGenes.csv"))
+
+gc_pos_by_gene <- codon_usage %>%
+  mutate(
+    codon = tolower(codon),
+    gc1 = str_sub(codon, 1, 1) %in% c("g", "c"),
+    gc2 = str_sub(codon, 2, 2) %in% c("g", "c"),
+    gc3 = str_sub(codon, 3, 3) %in% c("g", "c")
+  ) %>%
+  group_by(gene) %>%
+  summarise(
+    GC1 = sum(freq[gc1], na.rm = TRUE),
+    GC2 = sum(freq[gc2], na.rm = TRUE),
+    GC3 = sum(freq[gc3], na.rm = TRUE),
+    .groups = "drop"
+  )
+write.csv(gc_pos_by_gene,file.path(base_dir,"GC_Position_UsagePerGene.csv"))
+
+```
+
+
+
+

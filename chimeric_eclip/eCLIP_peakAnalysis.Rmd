@@ -1,0 +1,258 @@
+---
+title: "Untitled"
+author: "Courtney Whilden"
+date: "2026-03-20"
+output: html_document
+---
+### settings
+```{r}
+library(tidyverse, quietly=TRUE)
+library(ggplot2, quietly=TRUE)
+library(tools, quietly=TRUE)
+library(ggrepel, quietly=TRUE)
+```
+
+```{r setup}
+# Project directory
+clusterRoot <- "/n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2"
+macRoot     <- "/Volumes/whipple_lab/Users/cwhilden/PROJECTS/THESIS/chapter2"
+
+# Import whilden plot settings
+plotSave <- function(plotVar, fileName, outSave=outDir, w=1.5, h=1.5){
+  ggsave(
+  filename = file.path(outSave,fileName),
+  plot = plotVar,
+  device = "pdf",
+  width = w,
+  height = h,
+  units = "in"
+  )
+}
+
+# PLOT THEME
+paletteCW <- c(
+  Pink_CW      = "#EC008C",
+  Teal_CW      = "#008C8C",
+  Charcoal_CW  = "#2E2E2E",
+  LimeGreen_CW = "#9BC53D",
+  SoftOrange_CW= "#F4A261",
+  Purple_CW    = "#7B2CBF"
+)
+
+themeCW <- function(baseSize = 6) {
+  theme_minimal(base_size = baseSize) %+replace%
+    theme(
+      # panel
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(fill = NA, colour = "black", size = 0.5),
+      
+      # axes lines/ticks/text
+      axis.line = element_blank(),                      # border handles the visual frame
+      axis.ticks = element_line(size = 0.5),
+      axis.ticks.length = unit(0.03, "in"),
+      axis.text = element_text(size = baseSize, colour = "black"),
+      axis.title = element_text(size = baseSize, colour = "black"),
+      
+      # legend
+      legend.key        = element_blank(),
+      legend.background = element_blank(),
+      legend.text       = element_text(size = baseSize),
+      legend.title = element_blank(),
+      
+      legend.key.size   = unit(0.2, "cm"),
+      legend.spacing.y  = unit(1, "pt"),
+      legend.margin     = margin(0, 0, 0, 0, unit = "pt"),
+      legend.position = "top",
+      
+      # plot text & margins
+      plot.title = element_text(size = baseSize, colour = "black"),
+      plot.subtitle = element_text(size = baseSize, colour = "black"),
+      plot.margin = margin(5, 5, 5, 5, unit = "pt"),
+      
+      aspect.ratio=1
+    )
+  
+}
+```
+
+# Read in peak results
+```{r}
+
+annotatePeaks <- function(peakDataFile,
+                          peakAnnotFile,
+                          outFile){
+
+  peakData<-read_tsv(peakDataFile,col_names=FALSE)
+  peakAnnot<-read_tsv(peakAnnotFile)
+
+  colnames(peakData)<-c(
+  "chromosome",
+  "start",
+  "end",
+  "name",
+  "reads in CLIP",
+  "reads in INPUT",
+  "p-value",
+  "chi_val_or_Fisher",
+  "Fisher_orChi_square_test",
+  "enriched_or_depleted",
+  "negative_log10p",
+  "log2_fold_change",
+  "entropy")
+  
+  
+  peakClean <- peakData %>%
+    mutate(peakID=paste(chromosome,start,end,sep="_"))
+  
+  annotClean <- peakAnnot %>%
+    mutate(peakID=paste(Chr,Start-1,End,sep="_")) %>%
+    select(all_of(c('peakID','Gene Name', 'Gene Type','Detailed Annotation')))
+  
+  annotPeaks <- left_join(peakClean,annotClean,by='peakID')
+  
+  write.csv(annotPeaks,outFile)
+
+}
+
+annotatePeaks(file.path(macRoot,"results/eCLIP/peaksNorm/SSEXPT8_IP_B_S4_R1_001.trim.Aligned.sortedByCoord.out.rmdup.sorted.full"),file.path(macRoot,"results/eCLIP/peakCalling/map_oneCopy/iNeuron_rep_coord.annotated.bed"), file.path(macRoot,"summaryFiles/eCLIP_peaks/SSEXPT8_IP_B_eclip_peaks.csv"))
+
+annotatePeaks(file.path(macRoot,"results/eCLIP/peaksNorm/SSEXPT8_IP_A_S3_R1_001.trim.Aligned.sortedByCoord.out.rmdup.sorted.full"),file.path(macRoot,"results/eCLIP/peakCalling/map_oneCopy/iNeuron_rep_coord.annotated.bed"), file.path(macRoot,"summaryFiles/eCLIP_peaks/SSEXPT8_IP_A_eclip_peaks.csv"))
+
+
+annotatePeaks(file.path(macRoot,"results/eCLIP/peaksNorm/Fbl_IP_S2_L12_R1_001.trim.Aligned.sortedByCoord.out.rmdup.sorted.full"),file.path(macRoot,"results/eCLIP/peakCalling/map_oneCopy/Fbl_IP_S2_L12_R1_001.merge.annotated.bed"), file.path(macRoot,"summaryFiles/eCLIP_peaks/FBL_IP_eclip_peaks.csv"))
+
+annotatePeaks(file.path(macRoot,"results/eCLIP/peaksNorm/TDZ-7_S7_R1_001.trim.Aligned.sortedByCoord.out.rmdup.sorted.full"),file.path(macRoot,"results/eCLIP/peakCalling/map_oneCopy/TDZ-7_S7_R1_001.merge.annotated.bed"), file.path(macRoot,"summaryFiles/eCLIP_peaks/TDZ-7_S7_IP_eclip_peaks.csv"))
+
+
+```
+
+# Check enrichment of snoRNAs
+```{r}
+
+snoInfo<-read_tsv(file.path(macRoot,"references/eclip_sno/snoRNA_MASTERv5_mm10.txt")) %>%
+  select(all_of(c('snoID','gene_name','box')))
+
+getSnoRNAs <- function(peakFile,
+                       sampleName){
+  # Read data file
+  data<-read_csv(peakFile) %>%
+    #filter(`Gene Type` == 'snoRNA') %>%
+    select(all_of(c('Gene Name','peakID','log2_fold_change','negative_log10p'))) %>%
+    mutate(sample=sampleName) %>%
+    rename('gene_name'='Gene Name')
+  
+}
+
+snoA <- getSnoRNAs(file.path(macRoot,"summaryFiles/eCLIP_peaks/SSEXPT8_IP_A_eclip_peaks.csv"), 'iNeuron_A')
+snoB<- getSnoRNAs(file.path(macRoot,"summaryFiles/eCLIP_peaks/SSEXPT8_IP_B_eclip_peaks.csv"), 'iNeuron_B')
+probe <-getSnoRNAs(file.path(macRoot,"summaryFiles/eCLIP_peaks/TDZ-7_S7_IP_eclip_peaks.csv"), 'probe')
+esc <-getSnoRNAs(file.path(macRoot,"summaryFiles/eCLIP_peaks/FBL_IP_eclip_peaks.csv"), 'esc')
+
+```
+
+iNeurons - enrichment per peak
+```{r}
+iNeurons <- bind_rows(snoA,snoB) %>%
+  group_by(peakID, gene_name) %>%
+  summarise(l2pfe=mean(log2_fold_change),
+            neglog10p=mean(negative_log10p))
+
+cd_sno <- snoInfo %>%
+  filter(box=='CD') %>% select('gene_name')
+haca <- snoInfo %>%
+  filter(box=='HACA') %>% select('gene_name')
+
+iNeurons<- iNeurons %>% mutate(is_cd=case_when(gene_name %in% cd_sno$gene_name ~ 'cd_sno',
+                            gene_name %in% haca$gene_name ~ 'haca_sno',
+                            TRUE ~ 'other'))
+
+
+plot2<-ggplot(iNeurons,
+       aes(x=l2pfe,
+           y=neglog10p,
+           color=is_cd))  +
+  geom_text_repel(
+    data = dplyr::filter(iNeurons, gene_name == "Snord116l2"),
+    aes(label = gene_name),
+    color = "black",
+    size = 3,
+    min.segment.length = 0,    # always draw the connecting line
+    box.padding = 0.8,         # push label further from point
+    point.padding = 0.1,
+    segment.color = "black",
+    nudge_x = 1,               # nudge label away from the point
+    nudge_y = 1                # adjust these values to taste
+  ) +
+  geom_point() +
+  themeCW()
+
+outDir<-file.path(macRoot,"plots/eCLIP_peaks")
+plotSave(plot2,"iNeuron_pvalue_v_peakFE.pdf")
+
+plot2
+
+```
+# join log2
+```{r}
+sel<-c('peakID','log2_fold_change')
+
+join<-select(snoA,all_of(sel)) %>%
+  left_join(select(snoB,all_of(sel)),by='peakID')
+
+cd_sno <- snoInfo %>%
+  filter(box=='CD') %>% select('gene_name')
+haca <- snoInfo %>%
+  filter(box=='HACA') %>% select('gene_name')
+
+
+annot<-select(snoA,all_of(c('gene_name','peakID'))) %>%
+  mutate(snoColor=case_when(gene_name %in% cd_sno$gene_name ~ 'cd_sno',
+                            gene_name %in% haca$gene_name ~ 'haca_sno',
+                            TRUE ~ 'other'
+                            ))
+
+join_final<-left_join(join,annot,by='peakID')
+
+plot<-ggplot(join_final,
+       aes(x=log2_fold_change.x,
+           y=log2_fold_change.y,
+           color=snoColor)) +
+  geom_point() + themeCW()
+
+outDir<-file.path(macRoot,"plots/eCLIP_peaks")
+plotSave(plot,"iNeuron_Reps_peaksColoredBysno.pdf")
+
+plot
+```
+
+## Get significant snoRNA peaks
+
+```{r}
+df <- join_final %>%
+  filter(snoColor != 'other')
+
+
+plot3<-ggplot(df,
+       aes(x = log2_fold_change.x,
+           y = log2_fold_change.y,
+           color = snoColor)) +
+  geom_point(size = 1.5) +
+  geom_text_repel(
+    data = dplyr::filter(df, gene_name == "Snord116l2"),
+    aes(label = gene_name),
+    color = "black",
+    size = 3,
+    min.segment.length = 0,    # always draw the connecting line
+    box.padding = 0.8,         # push label further from point
+    point.padding = 0.1,
+    segment.color = "black",
+    nudge_x = 1,               # nudge label away from the point
+    nudge_y = 1                # adjust these values to taste
+  ) +
+  themeCW()
+  
+```
+
+

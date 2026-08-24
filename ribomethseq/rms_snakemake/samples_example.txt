@@ -1,0 +1,1 @@
+CTL_CTX_BS2	/n/whipple_lab/share_root/Lab/data_raw_seq/CMW_EXPT055_rms_snord116/raw_fastq/BS2ctx_1.fq.gz

@@ -1,0 +1,261 @@
+---
+title: "Untitled"
+author: "Courtney Whilden"
+date: "2026-03-20"
+output: html_document
+---
+### settings
+```{r}
+library(tidyverse, quietly=TRUE)
+library(ggplot2, quietly=TRUE)
+library(tools, quietly=TRUE)
+library(ggrepel, quietly=TRUE)
+```
+
+```{r setup}
+# Project directory
+clusterRoot <- "/n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2"
+macRoot     <- "/Volumes/whipple_lab/Users/cwhilden/PROJECTS/THESIS/chapter2"
+
+# Import whilden plot settings
+plotSave <- function(plotVar, fileName, outSave=outDir, w=1.5, h=1.5){
+  ggsave(
+  filename = file.path(outSave,fileName),
+  plot = plotVar,
+  device = "pdf",
+  width = w,
+  height = h,
+  units = "in"
+  )
+}
+
+# PLOT THEME
+paletteCW <- c(
+  Pink_CW      = "#EC008C",
+  Teal_CW      = "#008C8C",
+  Charcoal_CW  = "#2E2E2E",
+  LimeGreen_CW = "#9BC53D",
+  SoftOrange_CW= "#F4A261",
+  Purple_CW    = "#7B2CBF"
+)
+
+themeCW <- function(baseSize = 6) {
+  theme_minimal(base_size = baseSize) %+replace%
+    theme(
+      # panel
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(fill = NA, colour = "black", size = 0.5),
+      
+      # axes lines/ticks/text
+      axis.line = element_blank(),                      # border handles the visual frame
+      axis.ticks = element_line(size = 0.5),
+      axis.ticks.length = unit(0.03, "in"),
+      axis.text = element_text(size = baseSize, colour = "black"),
+      axis.title = element_text(size = baseSize, colour = "black"),
+      
+      # legend
+      legend.key        = element_blank(),
+      legend.background = element_blank(),
+      legend.text       = element_text(size = baseSize),
+      legend.title = element_blank(),
+      
+      legend.key.size   = unit(0.2, "cm"),
+      legend.spacing.y  = unit(1, "pt"),
+      legend.margin     = margin(0, 0, 0, 0, unit = "pt"),
+      legend.position = "top",
+      
+      # plot text & margins
+      plot.title = element_text(size = baseSize, colour = "black"),
+      plot.subtitle = element_text(size = baseSize, colour = "black"),
+      plot.margin = margin(5, 5, 5, 5, unit = "pt"),
+      
+      aspect.ratio=1
+    )
+  
+}
+```
+
+
+```{r}
+data<-read_csv(file.path(macRoot,"summaryFiles/eCLIP/eCLIP_oneCopy_CPM_CountsSummary.csv"))
+sampleInfo<-read_csv(file.path(macRoot,"references/sampleAlias.csv"))
+snoInfo<-read_tsv(file.path(macRoot,"references/eclip_sno/snoRNA_MASTERv5_mm10.txt"))
+Nm_sno<-read_csv(file.path(macRoot,"references/Known_Nm_snoRNAs.csv"))
+
+# Annotate snoRNAs by their box type  
+snoType<-snoInfo %>%
+  select(all_of(c('gene_name','box')))
+colnames(snoType)<-c('Geneid','box')
+
+data2 <- data %>%
+  select(all_of(c(
+    'Geneid',
+    "SSEXPT8_IP_A_S3_R1_001",
+    "SSEXPT8_IP_B_S4_R1_001"
+  ))) %>%
+  filter(SSEXPT8_IP_A_S3_R1_001 != 0 & SSEXPT8_IP_B_S4_R1_001 != 0)
+  
+
+
+data_annot<- data2%>%
+  left_join(snoType,by='Geneid') %>%
+  mutate(snord=case_when(Geneid %in% Nm_sno$SNO ~ "Nm snoRNA",
+                         Geneid == 'Snord116l2' ~ 'Snord116',
+                         TRUE ~ 'other sno'))
+
+```
+
+Plot nonchimeras repa v repb
+```{r}
+# Create top 5 subset based on mean expression
+top5 <- data_annot %>%
+  mutate(mean_expr = (SSEXPT8_IP_A_S3_R1_001 + SSEXPT8_IP_B_S4_R1_001) / 2) %>%
+  slice_max(mean_expr, n = 5)
+
+# Plot
+plot<-ggplot(data_annot,
+       aes(x = log2(SSEXPT8_IP_A_S3_R1_001),
+           y = log2(SSEXPT8_IP_B_S4_R1_001),
+           color = snord)) +
+  geom_point() +
+  geom_text_repel(data = top5,
+                  aes(label = Geneid),
+                  color = "black",
+                  size = 3,
+                  box.padding = 0.5,
+                  max.overlaps = Inf) +
+  themeCW()
+
+outDir<-file.path(macRoot,"plots")
+plotSave(plot,"Nonchimeras_eCLIP_iNeuron_RepAvRepB.pdf")
+plot
+```
+
+
+
+iN vs. ESC
+```{r}
+data3 <- data %>%
+  select(all_of(c(
+    'Geneid',
+    "SSEXPT8_IP_A_S3_R1_001",
+    "SSEXPT8_IP_B_S4_R1_001",
+    "Fbl_IP_S2_L12_R1_001"
+  ))) %>%
+  filter(SSEXPT8_IP_A_S3_R1_001 != 0 & SSEXPT8_IP_B_S4_R1_001 != 0 & Fbl_IP_S2_L12_R1_001 != 0)
+
+
+
+data3$avg_iN<-(data3$SSEXPT8_IP_A_S3_R1_001+data3$SSEXPT8_IP_B_S4_R1_001)/2
+
+data3_annot<- data3%>%
+  left_join(snoType,by='Geneid') %>%
+  mutate(snord=case_when(Geneid %in% Nm_sno$SNO ~ "Nm snoRNA",
+                         Geneid == 'Snord116l2' ~ 'Snord116',
+                         TRUE ~ 'other sno'))
+# Create top 5 (of neurons) subset based on mean expression
+top5_iN <- data3 %>%
+  slice_max(avg_iN, n = 5)
+
+# Plot
+plot2<-ggplot(data3_annot,
+       aes(x = log2(Fbl_IP_S2_L12_R1_001),
+           y = log2(avg_iN),
+           color = snord)) +
+  geom_point() +
+  geom_text_repel(data = top5_iN,
+                  aes(label = Geneid),
+                  color = "black",
+                  size = 3,
+                  box.padding = 0.5,
+                  max.overlaps = Inf) +
+  themeCW()
+
+outDir<-file.path(macRoot,"plots")
+plotSave(plot2,"Nonchimeras_eCLIP_iNeuron_v_ESC.pdf")
+plot2
+```
+
+
+
+IGS_CW_1IP_CKDL250021054-1A_22W7L3LT4_L4_1 Steric_aseDp_RepA
+IGS_CW_2IP_CKDL250021054-1A_22W7L3LT4_L4_1 Steric_aseD_RepA
+IGS_CW_3IP_CKDL250021054-1A_22W7L3LT4_L4_1 Steric_ase101_RepA
+IGS_CW_4IP_CKDL250021054-1A_22W7L3LT4_L4_1 Steric_noASO_RepA
+
+# Plot no ASO vs aseDp
+
+```{r}
+dataASO <- data %>%
+  select(all_of(c(
+    'Geneid',
+    "IGS_CW_1IP_CKDL250021054-1A_22W7L3LT4_L4_1",
+    "IGS_CW_2IP_CKDL250021054-1A_22W7L3LT4_L4_1",
+    "IGS_CW_3IP_CKDL250021054-1A_22W7L3LT4_L4_1",
+    "IGS_CW_4IP_CKDL250021054-1A_22W7L3LT4_L4_1"
+  )))
+  
+
+dataASO_annot<- dataASO%>%
+  left_join(snoType,by='Geneid') %>%
+  mutate(snord=case_when(Geneid %in% Nm_sno$SNO ~ "Nm snoRNA",
+                         Geneid == 'Snord116l2' ~ 'Snord116',
+                         TRUE ~ 'other sno')) %>%
+  filter(snord=="Nm snoRNA" | snord=="Snord116")
+
+
+plotASO_Dp<-ggplot(dataASO_annot,aes(x=log2(`IGS_CW_4IP_CKDL250021054-1A_22W7L3LT4_L4_1`),
+           y=log2(`IGS_CW_1IP_CKDL250021054-1A_22W7L3LT4_L4_1`),
+           color=snord))  +
+  scale_x_continuous(limits = c(0, NA)) +
+  scale_y_continuous(limits = c(0, NA)) +
+  geom_point(size=1.5) +
+  geom_abline(slope=1,intercept=0) +
+  themeCW()
+
+outDir<-file.path(macRoot,"plots/stericblocking")
+
+plotSave(plotASO_Dp,"eCLIP_counts_ASEDp.pdf")
+plotASO_Dp
+
+```
+
+
+
+
+```{r}
+plotASO_D<-ggplot(dataASO_annot,aes(x=log2(`IGS_CW_4IP_CKDL250021054-1A_22W7L3LT4_L4_1`),
+           y=log2(`IGS_CW_2IP_CKDL250021054-1A_22W7L3LT4_L4_1`),
+           color=snord))  +
+  scale_x_continuous(limits = c(0, NA)) +
+  scale_y_continuous(limits = c(0, NA)) +
+  geom_point(size=1.5) +
+  geom_abline(slope=1,intercept=0) +
+  themeCW()
+
+outDir<-file.path(macRoot,"plots/stericblocking")
+
+plotSave(plotASO_D,"eCLIP_counts_ASED.pdf")
+plotASO_D
+
+```
+ 
+
+```{r}
+plot3<-ggplot(data_filter,aes(x=log2(`IGS_CW_4IP_CKDL250021054-1A_22W7L3LT4_L4_1`),
+           y=log2(`IGS_CW_3IP_CKDL250021054-1A_22W7L3LT4_L4_1`),
+           color=snoGroup))  +
+  scale_x_continuous(limits = c(0, NA)) +
+  scale_y_continuous(limits = c(0, NA)) +
+  geom_point(size=1.5) +
+  geom_abline(slope=1,intercept=0) +
+  themeCW()
+
+outDir<-file.path(macRoot,"plots/stericblocking")
+
+plotSave(plot3,"eCLIP_counts_ASE101.pdf")
+plot3
+
+```

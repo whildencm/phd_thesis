@@ -1,0 +1,530 @@
+---
+title: "Nm_snoRNAs_chimericAnalyses.Rmd"
+author: "Courtney Whilden"
+date: "2026-03-11"
+output: html_document
+---
+# Analysis of Nm-snoRNA chimeric reads
+## Overview
+
+### Set up
+- Loads packages
+```{r loadPackages}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse, quietly=TRUE)
+library(ggplot2, quietly=TRUE)
+library(metagene2, quietly=TRUE)
+library(ggrepel, quietly=TRUE)
+
+```
+
+- Sets project root directories
+- Sets plot themes
+```{r setup}
+# Project directory
+clusterRoot <- "/n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2"
+macRoot     <- "/Volumes/whipple_lab/Users/cwhilden/PROJECTS/THESIS/chapter2"
+
+# Import whilden plot settings
+plotSave <- function(plotVar, fileName, outSave=outDir, w=1.5, h=1.5){
+  ggsave(
+  filename = file.path(outSave,fileName),
+  plot = plotVar,
+  device = "pdf",
+  width = w,
+  height = h,
+  units = "in"
+  )
+}
+
+# PLOT THEME
+paletteCW <- c(
+  Pink_CW      = "#EC008C",
+  Teal_CW      = "#008C8C",
+  Charcoal_CW  = "#2E2E2E",
+  LimeGreen_CW = "#9BC53D",
+  SoftOrange_CW= "#F4A261",
+  Purple_CW    = "#7B2CBF"
+)
+
+themeCW <- function(baseSize = 6) {
+  theme_minimal(base_size = baseSize) %+replace%
+    theme(
+      # panel
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(fill = NA, colour = "black", size = 0.5),
+      
+      # axes lines/ticks/text
+      axis.line = element_blank(),                      # border handles the visual frame
+      axis.ticks = element_line(size = 0.5),
+      axis.ticks.length = unit(0.03, "in"),
+      axis.text = element_text(size = baseSize, colour = "black"),
+      axis.title = element_text(size = baseSize, colour = "black"),
+      
+      # legend
+      legend.key        = element_blank(),
+      legend.background = element_blank(),
+      legend.text       = element_text(size = baseSize),
+      legend.title = element_blank(),
+      
+      legend.key.size   = unit(0.2, "cm"),
+      legend.spacing.y  = unit(1, "pt"),
+      legend.margin     = margin(0, 0, 0, 0, unit = "pt"),
+      legend.position = "top",
+      
+      # plot text & margins
+      plot.title = element_text(size = baseSize, colour = "black"),
+      plot.subtitle = element_text(size = baseSize, colour = "black"),
+      plot.margin = margin(5, 5, 5, 5, unit = "pt"),
+      
+      aspect.ratio=1
+    )
+  
+}
+```
+
+# Calculate chimeras per target class - Nm sno vs. 116
+
+Summary file paths
+```{r}
+# Read in Nm snoRNA annotation file
+Nm <- read_csv(file.path(macRoot,"references/Known_Nm_snoRNAs.csv"))%>%
+  select('SNO')
+
+# import chimeras, and separate into classes "Nm", "Snord116", "other"
+chimeras <- read_csv(file.path(macRoot,"summaryFiles/chimericCounts/All_ChimeraCounts.csv")) %>%
+  # strip ".sno" suffix from sample columns if present
+  rename_with(~ sub("\\.sno$", "", .x), -c(snoRNA, target)) %>%
+  mutate(snoType=case_when(snoRNA %in% Nm$SNO ~ 'Nm',
+                   snoRNA == 'Snord116_Snord116l2' ~ 'Snord116',
+                   TRUE ~ 'Other'))
+
+#Import sample alias file
+alias <- read_csv(file.path(macRoot,"references/sampleAlias.csv"))
+
+# Pivot for plotting & replace sample
+chimeras_long <- chimeras %>%
+  pivot_longer(
+    cols = -c(snoRNA, target, snoType),
+    names_to = "sample",
+    values_to = "count"
+  ) %>%
+  left_join(alias, by = "sample") %>%
+  mutate(alias_sno=paste(alias,snoType,sep=";")) %>%
+  select(all_of(c('alias_sno','sample','alias','snoRNA','target','count')))
+
+# Total chimeric reads per sample (CPM denominator)
+sample_totals_bySnoClass <- chimeras_long %>%
+  group_by(alias_sno) %>%
+  summarise(total_count = sum(count, na.rm = TRUE), .groups = "drop")
+
+# Sum across all snoRNAs for each target/sample, then calculate CPM
+chimeras_by_target <- chimeras_long %>%
+  group_by(alias_sno,target) %>%
+  summarise(target_count = sum(count, na.rm = TRUE), .groups = "drop") %>%
+  left_join(sample_totals_bySnoClass , by = "alias_sno") %>%
+  mutate(cpm = (target_count / total_count) * 1e6) %>%
+  separate(alias_sno, into = c("alias", "snoType"), sep = ";")
+
+
+# Save raw counts per target for downstream analyses
+rawPerTarget <- chimeras_long %>%
+  group_by(sample) %>%
+  summarise(total=sum(count,na.rm=TRUE),.groups="drop")
+
+```
+
+# Nm sno only
+Exports a plot of the number of chimeras within each target class
+```{r}
+samples1 <- c('ESC_IP_RepA','iNeuron_IP_RepA','iNeuron_IP_RepB','Steric_noASO_RepA')
+
+# Select samples & Nm snoRNAs only
+Nm_plot <- chimeras_by_target %>%
+  filter(alias %in% samples1 & snoType == "Nm") %>%
+  mutate(
+    alias   = factor(alias,   levels = samples1),
+    target  = factor(target,  levels = c("genome", "scaRNA", "snRNA", "tRNA","rRNA"))
+  )
+
+# Plot
+plot1<-ggplot(Nm_plot, aes(x = alias, y = cpm, fill = target)) +
+  geom_bar(stat = "identity") +
+  labs(
+    y = "Read counts",
+    x = "Sample",
+    fill = "Category"
+  ) +
+  themeCW()
+
+write.csv(Nm_plot,file.path(macRoot,"summaryFiles/chimericCounts/Nm_snoRNAs_chimera_target_distribution.csv"))
+outDir=file.path(macRoot,"plots/Nm-snoRNAs")
+if (!dir.exists(outDir)) dir.create(outDir, recursive = TRUE)
+
+outDir <- file.path(macRoot,"plots/Nm-snoRNAs")
+dir.create(outDir, recursive = TRUE)
+
+plotSave(plot1, "Nm_snoRNAs_chimera_target_distribution.pdf")
+
+plot1
+```
+
+#=======
+# CHIMERAS PER SNORNA
+#=======
+```{r}
+# Total chimeric reads per sample (CPM denominator)
+sample_totals <- chimeras_long %>%
+  group_by(alias) %>%
+  summarise(total_count = sum(count, na.rm = TRUE), .groups = "drop")
+
+# Sum across all snoRNAs for each target/sample, then calculate CPM
+chimeras_by_sno <- chimeras_long %>%
+  group_by(alias,snoRNA) %>%
+  summarise(target_count = sum(count, na.rm = TRUE), .groups = "drop") %>%
+  left_join(sample_totals, by = "alias") %>%
+  mutate(cpm = (target_count / total_count) * 1e6) %>%
+  mutate(log2CPMplus1=log2(cpm+1))
+
+# Pivot wider so each alias is a column
+chimeras_by_sno_wide <- chimeras_by_sno %>%
+  select(alias, snoRNA, log2CPMplus1) %>%
+  pivot_wider(names_from = alias, values_from = log2CPMplus1) %>%
+  mutate(iNeuron_IP_Avg=(iNeuron_IP_RepA + iNeuron_IP_RepB)/2,
+         sno_class=case_when(snoRNA %in% Nm$SNO ~ "Nm",
+                             snoRNA == 'Snord116_Snord116l2' ~ 'Snord116',
+                             TRUE ~ 'Other'))
+
+snord116_CPM <- chimeras_by_sno %>%
+  select(alias, snoRNA, cpm) %>%
+  pivot_wider(names_from = alias, values_from = cpm) %>%
+  mutate(iNeuron_IP_Avg=(iNeuron_IP_RepA + iNeuron_IP_RepB)/2) %>%
+  filter(snoRNA == 'Snord116_Snord116l2')
+      
+
+# iN reps
+# Calculate Pearson's r on the non-NA pairs
+cor_val1 <- cor(
+  chimeras_by_sno_wide$iNeuron_IP_RepA,
+  chimeras_by_sno_wide$iNeuron_IP_RepB,
+  use = "complete.obs",
+  method = "pearson"
+)
+
+plot2 <- ggplot(chimeras_by_sno_wide, aes(x = iNeuron_IP_RepA, y = iNeuron_IP_RepB, color=sno_class)) +
+  geom_point(size = 1.5, alpha = 0.6) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", colour = "grey50", size = 0.3) +
+  annotate("text",
+           x = Inf, y = -Inf,
+           hjust = 1.1, vjust = -0.5,
+           label = paste0("r = ", round(cor_val1, 3)),
+           size = 6 / .pt,
+           colour = "black") +
+  labs(title = "log2(Chimeric RPM + 1)") +
+  themeCW() +
+  expand_limits(x = 0, y = 0)
+
+#plotSave(plot2, "iNeuron_chimerasPerSno_RepA_vs_RepB.pdf")
+plot2
+```
+### plot snoRNA chimeras in ESCs vs. iNs
+```{r}
+top5_iN <- chimeras_by_sno_wide %>%
+  slice_max(iNeuron_IP_Avg, n = 5)
+
+plot3 <- ggplot(chimeras_by_sno_wide, aes(x = ESC_IP_RepA, y = iNeuron_IP_Avg, color=sno_class)) +
+  geom_point(size=1.5) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed",
+              colour = "grey50", size = 0.3) +
+  geom_text_repel(data = top5_iN,
+                  aes(label = snoRNA),
+                  color = "black",
+                  size = 1,
+                  box.padding = 0.5,
+                  max.overlaps = Inf) +
+  labs(title = "log2(Chimeric RPM + 1)") +
+  themeCW() +
+  expand_limits(x = 0, y = 0)
+
+plotSave(plot3,"chimerasPerSno_ESC_v_iNeuron.pdf")
+plot3
+```
+
+
+
+
+
+#======
+# Merge Nm-snoRNA bam files into one
+#======
+# Find all bam files for a given sample and export a list
+```{r, echo=FALSE}
+# Project directory
+clusterRoot <- "/n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2"
+macRoot     <- "/Volumes/whipple_lab/Users/cwhilden/PROJECTS/THESIS/chapter2"
+
+# Read in data files
+Nm <- read_csv(file.path(macRoot,"references/Known_Nm_snoRNAs.csv"))%>%
+  select('SNO')
+  
+bamDir <- file.path(macRoot,"results/mapChimeras")
+  
+
+output=file.path(macRoot,"results/Nm_snoRNAs/bamLists")
+dir.create(output, recursive = TRUE)
+
+# Generate lists of Nm-sno bam files for each sample
+listNmBams <- function(sample,
+                       bams=bamDir,
+                       names=Nm,
+                       outDir=output,
+                       cluster=file.path(clusterRoot,"results/mapChimeras")){
+
+  
+  bamFiles=list.files(bams,
+                      pattern=paste0("^", sample, "\\.snoRNA\\..+\\.chimeras\\.bam$"),
+                      full.names=TRUE)
+  
+
+  # Extract target type from bam file name
+  base <- basename(bamFiles)
+  
+  # Append cluster dir to path
+  path=file.path(cluster,base)
+  
+  targetType <- sub(".*\\.snoRNA\\.([^.]+)\\..*\\.chimeras\\.bam$", "\\1", base)
+  
+  # Extract snoRNA name from bam file name
+  snoName <- base
+  snoName <- sub(".*\\.snoRNA\\.[^.]+\\.", "", snoName)
+  snoName <- sub("\\.chimeras\\.bam$", "", snoName)
+  
+  # Combine into a data frame
+  df_nm <- dplyr::filter(df, snoName %in% names$SNO)
+
+  # Keep only Nm snoRNAs
+  dfNm <- df[df$snoName %in% names$SNO, , drop = FALSE]
+  
+  # Write a Nm-snoRNA bam list for each target type
+  targets <- sort(unique(dfNm$targetType))
+  
+  for (t in targets) {
+    paths <- dfNm$path[dfNm$targetType == t]
+    # stable ordering
+    paths <- sort(paths)
+    outPath <- file.path(outDir, paste0(sample,"_NmSno_", t, ".txt"))
+    writeLines(paths, outPath)
+    message(sprintf("Wrote %s (%d files)", outPath, length(paths)))
+  }
+
+}
+
+listNmBams(sample="SSEXPT8_IP_A_S3_R1_001")
+listNmBams(sample="SSEXPT8_IP_B_S4_R1_001")
+
+```
+
+## Merge Nm-sno bam files for each sample, based on bamLists
+```{bash, eval=FALSE}
+salloc -p whipple -c 10 --mem 50G -t 300
+
+# Load environment
+module load Mambaforge
+mamba activate /n/whipple_lab/share_root/Users/cwhilden/ENVS/chimericCW_001     
+
+# Set directories
+clusterRoot=/n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2
+listDir="${clusterRoot}/results/Nm_snoRNAs/bamLists"
+outDir="${clusterRoot}/results/Nm_snoRNAs"
+mkdir -p $outDir
+
+for listFile in "$listDir"/*_NmSno_*.txt; do
+  base="$(basename "$listFile")"
+
+  # Parse sample and targetType from: <sample>_NmSno_<target>.txt
+  sample="${base%_NmSno_*}"
+  targetPart="${base#*_NmSno_}"
+  targetType="${targetPart%.txt}"
+
+  outBam="${outDir}/${sample}.All-NmSno-chimeras.${targetType}.bam"
+
+  # Read paths from list (safe for spaces)
+  mapfile -t bamFiles < "$listFile"
+
+  if [[ ${#bamFiles[@]} -eq 0 ]]; then
+    echo "Empty list: $listFile (skipping)"
+    continue
+  fi
+  
+  echo "Merging ${#bamFiles[@]} BAMs for sample=${sample} target=${targetType}"
+  echo "  list: $listFile"
+  echo "  out : $outBam"
+
+  samtools merge -@ 8 -f "$outBam" "${bamFiles[@]}"
+  samtools index -@ 8 "$outBam"
+done
+
+echo "Done. Merged BAMs in: $outDir"
+```
+
+## Generate chimeric RPM BW files for IGV tracks
+```{bash, eval=FALSE}
+# Start interactive session
+salloc -p whipple -c 4 --mem 50G -t 300
+
+# Load environment
+module load Mambaforge
+mamba activate /n/whipple_lab/share_root/Users/cwhilden/ENVS/chimericCW_001 
+
+# Run chimeric bam2bw script on desired bam file:
+totalChimerasFile="summaryFiles/chimericCounts/ChimerasPerClass_AllSamples.csv"
+bamDir="results/Nm_snoRNAs"
+bwDir="results/Nm_snoRNAs/CPM_BW"
+mkdir -p $bwDir
+
+# make rRNA and snRNA tracks
+samples=(SSEXPT8_IP_A_S3_R1_001 SSEXPT8_IP_B_S4_R1_001)
+
+for sample in "${samples[@]}"; do
+
+  # rRNA chimeras
+  scripts/chimericBam2bw_cpm.sh $totalChimerasFile \
+  ${sample} \
+  ${bamDir}/${sample}.All-NmSno-chimeras.rRNA.bam \
+  ${bwDir}/${sample}.All-NmSno-chimeras.rRNA.cpm.bw \
+  ${bwDir}/${sample}.All-NmSno-chimeras.rRNA.cpm.log
+
+  #snRNA chimeras
+  scripts/chimericBam2bw_cpm.sh $totalChimerasFile \
+  ${sample} \
+  ${bamDir}/${sample}.All-NmSno-chimeras.snRNA.bam \
+  ${bwDir}/${sample}.All-NmSno-chimeras.snRNA.cpm.bw \
+  ${bwDir}/${sample}.All-NmSno-chimeras.snRNA.cpm.log  
+
+done
+```
+
+#==========
+# METAGENE PLOTS : CHIMERAS NEAR NM SITES
+#===========
+### rRNA metagene plots
+```{r}
+nm_bed<-file.path(macRoot,'references/ModSites_rRNA_Nm.bed')
+psu_bed<-file.path(macRoot,'references/ModSites_rRNA_pU.bed')
+
+chimeraDir=file.path(macRoot,'results/Nm_snoRNAs')
+
+bams <- c(
+  file.path(chimeraDir, "SSEXPT8_IP_A_S3_R1_001.All-NmSno-chimeras.rRNA.bam"),
+  file.path(chimeraDir, "SSEXPT8_IP_B_S4_R1_001.All-NmSno-chimeras.rRNA.bam")
+)
+
+makeMetagene <- function(bed,
+                         chimeraBams){
+  
+  # Compare repA to repB
+  design <- data.frame(
+  Samples = chimeraBams,
+  RepA = c(1, 0),
+  RepB = c(0, 1)
+  )
+  
+  # Create metagene plot
+  metagene <- metagene2$new(
+  regions = bed,
+  bam_files = chimeraBams,
+  assay = "chipseq",
+  padding_size = 25
+  )
+  
+  metagene$group_coverages(design = design, normalization = 'RPM')
+  metagene$bin_coverages(bin_count = 25)
+  metagene$plot(title = 'Nm-rRNA', 
+                region_names = NULL, 
+                design_names = NULL, 
+                x_label = NULL) + 
+    themeCW() + 
+    scale_y_continuous(limits = c(2200,10000))
+
+}
+
+
+outDir <- file.path(macRoot,"plots/Nm-snoRNAs")
+
+
+makeMetagene(psu_bed,bams) %>%
+  plotSave("Metagene_rRNA_pseudoU.pdf",outDir)
+
+makeMetagene(nm_bed,bams) %>%
+  plotSave("Metagene_rRNA_Nm.pdf",outDir)
+
+```
+
+
+### snRNA metagene plots
+```{r}
+nm_sn<-file.path(macRoot,'references/ModSites_snRNA_Nm.bed')
+psu_sn<-file.path(macRoot,'references/ModSites_snRNA_pU.bed')
+
+chimeraDir=file.path(macRoot,'results/Nm_snoRNAs')
+
+bams <- c(
+  file.path(chimeraDir, "SSEXPT8_IP_A_S3_R1_001.All-NmSno-chimeras.snRNA.bam"),
+  file.path(chimeraDir, "SSEXPT8_IP_B_S4_R1_001.All-NmSno-chimeras.snRNA.bam")
+)
+
+makeMetageneSN <- function(bed,
+                         chimeraBams){
+  
+  # Compare repA to repB
+  design <- data.frame(
+  Samples = chimeraBams,
+  RepA = c(1, 0),
+  RepB = c(0, 1)
+  )
+  
+  # Create metagene plot
+  metagene <- metagene2$new(
+  regions = bed,
+  bam_files = chimeraBams,
+  assay = "chipseq",
+  padding_size = 15
+  )
+  
+  metagene$group_coverages(design = design, normalization = 'RPM')
+  metagene$bin_coverages(bin_count = 15)
+  metagene$plot(title = 'Nm-rRNA', 
+                region_names = NULL, 
+                design_names = NULL, 
+                x_label = NULL) + 
+    themeCW() + 
+    scale_y_continuous(limits = c(15000,150000))
+
+}
+
+
+outDir <- file.path(macRoot,"plots/Nm-snoRNAs")
+
+
+makeMetageneSN(psu_sn,bams) %>%
+  plotSave("Metagene_snRNA_pseudoU.pdf",outDir)
+
+makeMetageneSN(nm_sn,bams) %>%
+  plotSave("Metagene_snRNA_Nm.pdf",outDir)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+

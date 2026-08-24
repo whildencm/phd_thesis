@@ -1,0 +1,17 @@
+##CLIPPER ENV BUILD for mm39
+salloc -p whipple -c 8 --mem 50G -t 300
+
+module load Mambaforge
+mamba activate clipper3_mm39
+
+# Install clipper
+cd PIPELINE/chimeCLIP_ref
+# cviets branch has mm39 included.... so just install that
+git clone https://github.com/cviets/clipper.git clipper_cviets
+
+
+cd clipper_cviets
+pip install .
+python3 setup.py build_ext --inplace
+
+

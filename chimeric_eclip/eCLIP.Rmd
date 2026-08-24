@@ -1,0 +1,307 @@
+# eCLIP analysis
+
+## eCLIP mapping
+Maps to a 'oneCopy' genome (with one copy of repeated snoRNAs) and a 'unique' genome (unique copies of repeated snoRNAs)
+
+### Clone eclip_sno into PIPELINE repo
+```{bash, eval=FALSE}
+cd /n/whipple_lab/share_root/Users/cwhilden/PIPELINE
+git clone git@github.com:whildencm/eclip_sno.git
+```
+
+### Prepare config files
+-Copied test files from PIPELINE/eclip_sno into config/
+-Copied slurm profile into profiles/
+
+### Execute the pipeline
+```{bash, eval=FALSE}
+cd /n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2
+module load Mambaforge
+mamba activate /n/whipple_lab/share_root/Users/cwhilden/ENVS/snakemake_py311
+pipeline=/n/whipple_lab/share_root/Users/cwhilden/PIPELINE/eclip_sno
+
+# DRY RUN
+snakemake --snakefile $pipeline/eclip.smk --configfile config/eclip_config.yaml --dryrun --unlock
+
+# FULL RUN: SLURM
+snakemake --profile profiles/slurm_eclip \
+  --snakefile $pipeline/eclip.smk \
+  --configfile config/eclip_config.yaml
+
+mamba deactivate
+```
+
+## Peak calling
+- Notes on how I generated the custom species files for clipper are in scripts/clipper_envBuild_mm39.Rmd
+
+```{bash, eval=FALSE}
+out=results/eCLIP/peakCalling/map_oneCopy
+bamDir=results/eCLIP/map_oneCopy
+
+sbatch scripts/eCLIP_peakCalling.sh $bamDir/SSEXPT8_IP_B_S4_R1_001.trim.Aligned.sortedByCoord.out.rmdup.bam $out
+sbatch scripts/eCLIP_peakCalling.sh $bamDir/Fbl_IP_S2_L12_R1_001.trim.Aligned.sortedByCoord.out.rmdup.bam $out
+sbatch scripts/eCLIP_peakCalling.sh $bamDir/SSEXPT8_IP_A_S3_R1_001.trim.Aligned.sortedByCoord.out.rmdup.bam $out
+sbatch scripts/eCLIP_peakCalling.sh $bamDir/TDZ-7_S7_R1_001.trim.Aligned.sortedByCoord.out.rmdup.sorted.bam $out
+
+```
+
+### Merge peak coordinates of biological replicates
+Intersect - keep the intersecting peak coordinates of RepA and RepB
+
+```{bash, eval=FALSE}
+salloc -p test -c 4 --mem 50G -t 300
+module load Mambaforge
+mamba activate /net/rcstorenfs/ifs/rc_labs/whipple_lab/share_root/Users/cwhilden/ENVS/chimericCW_001
+
+peak=results/eCLIP/peakCalling/map_oneCopy
+
+fileA=$peak/SSEXPT8_IP_A_S3_R1_001.bed
+fileB=$peak/SSEXPT8_IP_B_S4_R1_001.bed
+
+# Output "intersection" file
+bedtools intersect -a "$fileA" -b "$fileB" \
+  | bedtools sort -i - \
+  | bedtools merge -d 1 -c 4,5,6,7,8 -o distinct,min,distinct,min,max \
+   > "${peak}/iNeuron_rep_coord_intersect.bed"
+
+# Merge adjacent peak coordinates
+bedtools sort -i $peak/Fbl_IP_S2_L12_R1_001.bed | bedtools merge -d 1 -c 4,5,6,7,8 -o distinct,min,distinct,min,max > $peak/Fbl_IP_S2_L12_R1_001.merge.bed
+bedtools sort -i $peak/TDZ-7_S7_R1_001.trim.Aligned.sortedByCoord.out.rmdup.sorted.bam.bed| bedtools merge -d 1 -c 4,5,6,7,8 -o distinct,min,distinct,min,max > $peak/TDZ-7_S7_R1_001.merge.bed
+
+
+
+```
+### Annotate peaks with gene info:
+
+mamba activate clipper3_mm39
+
+#using homer
+gtf=/n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2/references/gencode.vM38.primary_assembly.annotation.gtf
+
+cd results/eCLIP/peakCalling/map_oneCopy
+annotatePeaks.pl iNeuron_rep_coord_intersect.bed none -gtf $gtf > "iNeuron_rep_coord.annotated.bed"
+annotatePeaks.pl iNeuron_rep_coord_intersect.bed none -gtf $gtf > "iNeuron_rep_coord.annotated.bed"
+
+annotatePeaks.pl Fbl_IP_S2_L12_R1_001.merge.bed none -gtf $gtf > "Fbl_IP_S2_L12_R1_001.merge.annotated.bed"
+annotatePeaks.pl TDZ-7_S7_R1_001.merge.bed none -gtf $gtf > "TDZ-7_S7_R1_001.merge.annotated.bed"
+
+
+### Normalize peaks to input
+
+```{bash, eval=FALSE}
+module load Mambaforge
+mamba activate IDR_py38
+bamDir=results/eCLIP/map_oneCopy
+
+sbatch scripts/eCLIP_peakNormalization.sh $bamDir/SSEXPT8_IP_A_S3_R1_001.trim.Aligned.sortedByCoord.out.rmdup.sorted.bam \
+$bamDir/SSEXPT8_IN_A_S1_R1_001.trim.Aligned.sortedByCoord.out.rmdup.sorted.bam \
+results/eCLIP/peakCalling/map_oneCopy/iNeuron_rep_coord_intersect.bed \
+results/eCLIP
+
+sbatch scripts/eCLIP_peakNormalization.sh $bamDir/SSEXPT8_IP_B_S4_R1_001.trim.Aligned.sortedByCoord.out.rmdup.sorted.bam \
+$bamDir/SSEXPT8_IN_B_S2_R1_001.trim.Aligned.sortedByCoord.out.rmdup.sorted.bam \
+results/eCLIP/peakCalling/map_oneCopy/iNeuron_rep_coord_intersect.bed \
+results/eCLIP
+
+sbatch scripts/eCLIP_peakNormalization.sh $bamDir/Fbl_IP_S2_L12_R1_001.trim.Aligned.sortedByCoord.out.rmdup.sorted.bam \
+$bamDir/Fbl_IN_S1_L12_R1_001.trim.Aligned.sortedByCoord.out.rmdup.sorted.bam \
+results/eCLIP/peakCalling/map_oneCopy/Fbl_IP_S2_L12_R1_001.merge.bed \
+results/eCLIP
+
+sbatch scripts/eCLIP_peakNormalization.sh $bamDir/TDZ-7_S7_R1_001.trim.Aligned.sortedByCoord.out.rmdup.sorted.bam \
+$bamDir/TDZ-3_S3_R1_001.trim.Aligned.sortedByCoord.out.rmdup.sorted.bam \
+results/eCLIP/peakCalling/map_oneCopy/TDZ-7_S7_R1_001.merge.bed \
+results/eCLIP
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# counting stuff
+Counting:
+I copied the snoRNA names from Lab Computing Resiources / snoRNA_mmu/snoRNA_MASTERv5.txt
+Uploaded to UCSC genome table browser and exported results > references/snoRNAs_mm39.txt & saf
+
+There are a few ways I could do the counting. I'm going to start with the unique copies,
+and count everything that does not multimap or overlap multiple gene ids.
+
+```{bash, eval=FALSE}
+salloc -p test -c 10 --mem 50G -t 300
+module load Mambaforge
+mamba activate /n/whipple_lab/share_root/Users/cwhilden/ENVS/chimericCW_001
+
+saf=references/eclip_sno/sno_mm39.saf
+bam=results/eCLIP/map_unique/SSEXPT8_IN_A_S1_R1_001.trim.Aligned.sortedByCoord.out.bam
+outDir=results/eCLIP/counts_unique
+mkdir -p $outDir
+
+featureCounts -T 8 -F SAF -a $saf -o $outDir/SSEXPT8_IN_A_S1_R1_001.counts.unique.txt $bam
+
+
+
+```
+
+
+
+### one copy counting
+```{bash, eval=FALSE}
+salloc -p test -c 10 --mem 50G -t 300
+module load Mambaforge
+mamba activate /n/whipple_lab/share_root/Users/cwhilden/ENVS/chimericCW_001
+
+saf=references/eclip_sno/sno_mm39.saf
+bamDir=results/eCLIP/map_oneCopy
+outDir=results/eCLIP/counts_oneCopy
+mkdir -p $outDir
+
+for bam in $bamDir/*.out.rmdup.bam; do
+  # no multi-mappers or multi-overlap
+
+  base=$(basename "$bam" ".trim.Aligned.sortedByCoord.out.rmdup.sorted.bam")
+  featureCounts -T 8 -F SAF -a $saf -o ${outDir}/${base}.counts.oneCopy.txt $bam
+
+done
+
+```
+
+### settings
+```{r}
+library(tidyverse, quietly=TRUE)
+library(ggplot2, quietly=TRUE)
+library(tools, quietly=TRUE)
+library(ggrepel, quietly=TRUE)
+```
+
+```{r setup}
+# Project directory
+clusterRoot <- "/n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2"
+macRoot     <- "/Volumes/whipple_lab/Users/cwhilden/PROJECTS/THESIS/chapter2"
+
+# Import whilden plot settings
+plotSave <- function(plotVar, fileName, outSave=outDir, w=1.5, h=1.5){
+  ggsave(
+  filename = file.path(outSave,fileName),
+  plot = plotVar,
+  device = "pdf",
+  width = w,
+  height = h,
+  units = "in"
+  )
+}
+
+# PLOT THEME
+paletteCW <- c(
+  Pink_CW      = "#EC008C",
+  Teal_CW      = "#008C8C",
+  Charcoal_CW  = "#2E2E2E",
+  LimeGreen_CW = "#9BC53D",
+  SoftOrange_CW= "#F4A261",
+  Purple_CW    = "#7B2CBF"
+)
+
+themeCW <- function(baseSize = 6) {
+  theme_minimal(base_size = baseSize) %+replace%
+    theme(
+      # panel
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(fill = NA, colour = "black", size = 0.5),
+      
+      # axes lines/ticks/text
+      axis.line = element_blank(),                      # border handles the visual frame
+      axis.ticks = element_line(size = 0.5),
+      axis.ticks.length = unit(0.03, "in"),
+      axis.text = element_text(size = baseSize, colour = "black"),
+      axis.title = element_text(size = baseSize, colour = "black"),
+      
+      # legend
+      legend.key        = element_blank(),
+      legend.background = element_blank(),
+      legend.text       = element_text(size = baseSize),
+      legend.title = element_blank(),
+      
+      legend.key.size   = unit(0.2, "cm"),
+      legend.spacing.y  = unit(1, "pt"),
+      legend.margin     = margin(0, 0, 0, 0, unit = "pt"),
+      legend.position = "top",
+      
+      # plot text & margins
+      plot.title = element_text(size = baseSize, colour = "black"),
+      plot.subtitle = element_text(size = baseSize, colour = "black"),
+      plot.margin = margin(5, 5, 5, 5, unit = "pt"),
+      
+      aspect.ratio=1
+    )
+  
+}
+```
+
+### summary file
+```{r}
+# Define paths
+sampleInfoFile<-file.path(macRoot,"references/sampleAlias.csv")
+countDir<-file.path(macRoot,"results/eCLIP/counts_oneCopy")
+
+###########
+# Function to combine counts across multiple samples into one data frame
+# Read in feature counts data
+dataFiles <- list.files(path = countDir, 
+                        pattern = "\\.counts.oneCopy.txt$", 
+                        full.names = TRUE)
+
+
+# Extract sample/snoRNA information from filename
+names<-sub("\\.trim.Aligned.sortedByCoord.out.rmdup.bam.counts.oneCopy.txt","",basename(dataFiles))
+
+# generate a named list of counts
+data <- purrr::set_names(dataFiles, names) %>%
+  purrr::map(~ readr::read_tsv(.x, show_col_types = FALSE, skip=1))
+  
+# Merge named list into a single data frame
+allData <- data[[1]][,1, drop=FALSE]
+
+for (i in seq_along(names)) {
+  # Read in counts column (column 7)
+  allData[[names[i]]] <- data[[i]][,7, drop=TRUE]
+  
+} 
+
+outDir<-file.path(macRoot,"summaryFiles/eCLIP")
+dir.create(outDir, recursive = TRUE)
+
+write.csv(allData, file.path(outDir,"eCLIP_oneCopy_RAW_CountsSummary.csv"))
+
+
+# Get CPM
+cpm_data <- allData %>%
+  mutate(across(-Geneid, ~ . / sum(.) * 1e6))
+
+write.csv(cpm_data, file.path(outDir,"eCLIP_oneCopy_CPM_CountsSummary.csv"))
+```
+
+
+
+

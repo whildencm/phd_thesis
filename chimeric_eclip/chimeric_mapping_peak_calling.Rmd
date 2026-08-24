@@ -1,0 +1,251 @@
+# Chimeric Mapping and Peak Calling
+## Introduction
+This file contains all analyses done to
+  1) Generate repeat-masked genome file
+  2) Map chimeric reads from IP samples
+  3) Map all reads from IN samples for peak normalization
+  4) Generate a summary file of chimeric reads for each sample
+  5) Perform peak calling using Clipper
+  6) Merge peak coordinates of biological replicates
+  7) Export summary file of all peak coordinates & calculate the fraction of per-snoRNA chimeras in each peak
+
+The following conda environments are required:
+  /n/whipple_lab/share_root/Users/cwhilden/ENVS/snakemake_py311 > export .yaml file & replace
+  /net/rcstorenfs/ifs/rc_labs/whipple_lab/share_root/Users/cwhilden/ENVS/chimericCW_001 > export .yaml file & replace
+  ***CLIPPER ENV****
+  ***IDR ENV*****
+  /n/whipple_lab/share_root/Users/cwhilden/ENVS/R_env > export .yaml file & replace, or try to merge it into chimericCW w/o changing other stuff
+
+## Dependencies
+### Install snakemake
+Snakemake with the slurm executor is required to run the chimeric mapping pipeline.
+
+Example of how to install snakemake
+```{bash,eval=FALSE}
+module load Mambaforge
+cd /n/whipple_lab/Users/cwhilden
+
+mamba create -p ENVS/snakemake_py311 python=3.11
+pip install snakemake
+pip install snakemake-executor-plugin-slurm
+
+```
+## Prepare sample information files config/
+
+
+## Download genome and gtf files
+```{bash, eval=FALSE}
+cd references
+
+# mm39 primary assembly
+wget https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_mouse/release_M38/GRCm39.primary_assembly.genome.fa.gz
+gunzip GRCm39.primary_assembly.genome.fa.gz
+
+# GTF
+wget https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_mouse/release_M38/gencode.vM38.primary_assembly.annotation.gtf.gz
+gunzip gencode.vM38.primary_assembly.annotation.gtf.gz
+
+# Gene symbol annotation
+wget https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_mouse/release_M38/gencode.vM38.metadata.MGI.gz
+gunzip gencode.vM38.metadata.MGI.gz
+
+# Repeat coordinates from UCSC
+wget ftp://hgdownload.soe.ucsc.edu/goldenPath/mm39/bigZips/mm39.trf.bed.gz
+gunzip mm39.trf.bed.gz
+```
+Mask repetive genome regions
+```{bash, eval=FALSE}
+salloc -p whipple -c 4 --mem 50G -t 300
+mamba activate /n/whipple_lab/share_root/Users/cwhilden/ENVS/chimericCW_001
+
+cd references
+bedtools maskfasta \
+    -fi GRCm39.primary_assembly.genome.fa \
+    -bed mm39.trf.bed \
+    -fo GRCm39.masked.fa
+```
+# Chimeric Mapping
+### Dry-run the pipeline & generate a rulegraph
+Dry-run to determine if the pipeline works & set the number of jobs in profiles/
+```{bash,eval=FALSE}
+cd /n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2
+module load Mambaforge
+mamba activate /n/whipple_lab/share_root/Users/cwhilden/ENVS/snakemake_py311
+
+snakemake --snakefile scripts/chimeric_snakemake/chimeclip.smk --configfile config/chimeric_config.yaml --dryrun #--unlock
+
+```
+
+Rule graph
+```{bash,eval=FALSE}
+snakemake --profile profiles/slurm_chimeric \
+  --snakefile scripts/chimeric_snakemake/chimeclip.smk \
+  --configfile config/chimeric_config.yaml \
+  --rulegraph | dot -Tpdf > chimeric_rulegraph.pdf
+```
+
+## Execute chimeric mapping pipeline
+```{bash,eval=FALSE}
+snakemake --profile profiles/slurm_chimeric \
+  --snakefile scripts/chimeric_snakemake/chimeclip.smk \
+  --configfile config/chimeric_config.yaml
+
+```
+### Convert input-clip files
+Convert sam > sorted bam > BigWig (CPM)
+```{bash, eval=FALSE}
+outDir=results/mapCLIP
+
+for bam in $outDir/*.sam; do
+  scripts/clipSam2bw_cpm.sh $bam $outDir
+done
+
+
+```
+
+
+
+### Summary: chimeric counts per sample
+Generate a summary file of snoRNA-target class chimeras. All samples will go into output/All_ChimeraCounts.csv
+  - To do: export R conda env yaml
+```{bash}
+inputDir=results/mapChimeras
+outputDir=summaryFiles/chimericCounts
+mkdir -p $outputDir
+
+module load Mambaforge
+mamba activate /n/whipple_lab/share_root/Users/cwhilden/ENVS/R_env
+Rscript scripts/totalChimerasPerSample.R $inputDir $outputDir
+
+```
+
+### Summary: chimeric counts per target class, per sample
+Input: summaryFiles/All_ChimeraCounts.csv
+Output: summaryFiles/ChimerasPerClass_AllSamples.csv
+
+```{bash}
+mamba activate /n/whipple_lab/share_root/Users/cwhilden/ENVS/R_env
+
+#Path to summary folder and output folder is hardcoded in this script > plan to move it
+Rscript scripts/chimerasPerTarget.R
+
+```
+
+# Peak Calling
+
+### Peak calling 'repeat' chimeras
+1. Pad chimeric bam files of IP saples and clip bam files of input samples
+2. Run clipper on chimeric bams
+
+```{bash, eval=FALSE}
+# Usage
+# sbatch scripts/peakCallRepeats.sh <path to chimeric mapping output> <output path> <fasta dir> <IP> <IN>
+
+
+in=results
+out=results/peakCallingRepeats
+fa=./references
+mkdir -p $outputDir
+
+sbatch scripts/peakCallRepeats.sh $in $out $fa SSEXPT8_IP_A_S3_R1_001 SSEXPT8_IN_A_S1_R1_001
+sbatch scripts/peakCallRepeats.sh $in $out $fa SSEXPT8_IP_B_S4_R1_001 SSEXPT8_IN_B_S2_R1_001
+sbatch scripts/peakCallRepeats.sh $in $out $fa TDZ-7_S7_R1_001 TDZ-3_S3_R1_001
+
+```
+### Merge peak coordinates of biological replicates
+Peak coordinates need to be the same for the normalization step. Here, I will merge the peaks in two ways.
+1) True merge- keep full peak coordinate of RepA and RepB > wider peaks
+2) Intersect - keep the intersecting peak coordinates of RepA and RepB > narrower peaks, but may lose some peaks
+
+```{bash, eval=FALSE}
+salloc -p test -c 4 --mem 50G -t 300
+module load Mambaforge
+mamba activate /net/rcstorenfs/ifs/rc_labs/whipple_lab/share_root/Users/cwhilden/ENVS/chimericCW_001
+
+peak=results/peakCallingRepeats
+
+scripts/mergeReplicatePeakCoord.sh \
+  $peak SSEXPT8_IP_A_S3_R1_001 SSEXPT8_IP_B_S4_R1_001 "iNeuron"
+```
+I ended up moving forward with the intersected peaks.
+
+### Normalize peaks to input (IDR)
+
+```{bash, eval=FALSE}
+peak=results/peakCallingRepeats
+output=results/peakCallingRepeats/NormalizedPeaks
+
+classes=(rRNA tRNA snRNA scaRNA)
+
+# Rep A
+for class in "${classes[@]}"; do
+  sbatch scripts/peakNormalization_mergedReps.sh \
+    $peak \
+    $peak/${class}_paddedPeaks/iNeuron_ReplicateCoordinates \
+    $output \
+    $class \
+    SSEXPT8_IP_A_S3_R1_001 SSEXPT8_IN_A_S1_R1_001
+done
+
+# Rep B
+for class in "${classes[@]}"; do
+  sbatch scripts/peakNormalization_mergedReps.sh \
+    $peak \
+    $peak/${class}_paddedPeaks/iNeuron_ReplicateCoordinates \
+    $output \
+    $class \
+    SSEXPT8_IP_B_S4_R1_001 SSEXPT8_IN_B_S2_R1_001
+done
+
+
+for class in "${classes[@]}"; do
+  sbatch scripts/peakNormalization_singleRep.sh \
+    $peak \
+    $peak/${class}_paddedPeaks/merged \
+    $output \
+    $class \
+    TDZ-7_S7_R1_001 TDZ-3_S3_R1_001
+done
+
+
+```
+
+### Generate a summary of all normalized peaks for each sample
+Outputs a .txt and a .saf file of all peaks
+```{bash, eval=FALSE}
+
+inputDir=results/peakCallingRepeats/NormalizedPeaks/peaksNorm
+peakSummaryDir=summaryFiles/peakSummaryFiles
+
+mkdir -p $peakSummaryDir
+
+samples=(SSEXPT8_IP_A_S3_R1_001 SSEXPT8_IP_B_S4_R1_001 TDZ-7_S7_R1_001)
+
+for sample in "${samples[@]}"; do
+    scripts/generatePeakSummary.sh $sample $inputDir $peakSummaryDir
+done
+```
+
+### Annotate peaks
+Annotate peaks as known/unknown based on Nm-snoRNA interactions
+Calculate the fraction of per-snoRNA chimeras in each peak
+
+Prepared a sample annotation file w/ sample aliases to make them easier to interpret:
+
+```{bash, eval=FALSE}
+module load Mambaforge
+mamba activate /n/whipple_lab/share_root/Users/cwhilden/ENVS/R_env
+
+
+peaks=summaryFiles/peakSummaryFiles # Directory of peak summary files
+nm=references/Known_Nm_snoRNAs.csv  # Annotation of Nm-snoRNA interactions
+chimera=summaryFiles/chimericCounts/All_ChimeraCounts.csv # Chimeric count summary file
+output=summaryFiles/peakSummaryFiles  # Output directory for annotated peak files
+alias=references/sampleAlias.csv  # File with sample names & corresponding alias
+
+
+Rscript scripts/calculateFractionInPeak.R $peaks $nm $chimera $output $alias
+
+```
+
+DONE

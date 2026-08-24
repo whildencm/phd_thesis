@@ -1,0 +1,12 @@
+/n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2/results/umi_extract_adapter_trim/SSEXPT8_IP_A_S3_R1_001.trim.fastq.gz
+/n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2/results/umi_extract_adapter_trim/SSEXPT8_IP_B_S4_R1_001.trim.fastq.gz
+/n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2/results/umi_extract_adapter_trim/TDZ-7_S7_R1_001.trim.fastq.gz
+/n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2/results/umi_extract_adapter_trim/IGS_CW_1IP_CKDL250021054-1A_22W7L3LT4_L4_1.trim.fastq.gz
+/n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2/results/umi_extract_adapter_trim/IGS_CW_2IP_CKDL250021054-1A_22W7L3LT4_L4_1.trim.fastq.gz
+/n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2/results/umi_extract_adapter_trim/IGS_CW_3IP_CKDL250021054-1A_22W7L3LT4_L4_1.trim.fastq.gz
+/n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2/results/umi_extract_adapter_trim/IGS_CW_4IP_CKDL250021054-1A_22W7L3LT4_L4_1.trim.fastq.gz
+/n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2/results/umi_extract_adapter_trim/Fbl_IP_S2_L12_R1_001.trim.fastq.gz
+/n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2/results/umi_extract_adapter_trim/SSEXPT8_IN_A_S1_R1_001.trim.fastq.gz
+/n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2/results/umi_extract_adapter_trim/SSEXPT8_IN_B_S2_R1_001.trim.fastq.gz
+/n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2/results/umi_extract_adapter_trim/TDZ-3_S3_R1_001.trim.fastq.gz
+/n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2/results/umi_extract_adapter_trim/Fbl_IN_S1_L12_R1_001.trim.fastq.gz

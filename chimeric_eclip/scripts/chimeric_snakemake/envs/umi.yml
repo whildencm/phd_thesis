@@ -1,0 +1,7 @@
+name: umi
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - umi_tools=1.0.1
+  - cutadapt

@@ -1,0 +1,248 @@
+---
+title: "gc_position_dTE"
+author: "Courtney Whilden"
+date: "2026-08-13"
+output: html_document
+---
+
+```{r}
+# LOAD PACKAGES
+library(seqinr)
+library(ggplot2)
+library(tidyverse)
+library(ggrepel)
+library(stringr)
+library(generics)
+library(broom)
+library(ggpubr)
+
+
+# DIRECTORIES
+tsl_dir <- "/Volumes/whipple_lab/Users/cwhilden/PROJECTS/manuscript_2026/riboseq/results/TE"
+rna_dir <- "/Volumes/whipple_lab/Users/cwhilden/PROJECTS/manuscript_2026/riboseq/results/TE"
+input_dir <- "/Volumes/whipple_lab/Users/cwhilden/PROJECTS/manuscript_2026/riboseq/results/codon_scores"
+
+output_dir <- "/Volumes/whipple_lab/Users/cwhilden/PROJECTS/manuscript_2026/riboseq/results/codon_usage_dTE"
+dir.create(output_dir, recursive = TRUE)
+
+# READ IN FILES
+
+usage_long <- read.csv(file.path(input_dir,"GC_Position_UsagePerGene.csv"))
+usage <- usage_long %>% dplyr::select(-X)
+
+tsl_results <- read.csv(file.path(tsl_dir, "P0_All_dTE_Results.csv"))
+rna_results <- read.csv(file.path(rna_dir, "P0_All_dRNA_Results.csv"))
+
+```
+
+Helper functions
+```{r}
+# ID UP, DOWN, NO CHANGE GENES
+
+gen_gene_lists <- function(results) {
+  up <- filter(results, padj < 0.1 & log2FoldChange > 0)
+  down <- filter(results, padj < 0.1 & log2FoldChange < 0)
+  no_change <- filter(results, padj >= 0.1)
+  return(list(up = up$X, down = down$X, no_change = no_change$X)) 
+}
+
+
+
+# LABEL GENES BY STATUS, EXTRACT CODON USAGE INFO
+
+filter_genes <- function(data, genes) {
+  filtered <- data %>%
+    filter(gene %in% c(genes$up, genes$down, genes$no_change)) %>%
+    mutate(Set = case_when(
+      gene %in% genes$up ~ "Up",
+      gene %in% genes$down ~ "Down",
+      TRUE ~ "NoChange"
+    ) %>% factor(levels = c("Down", "NoChange", "Up")))
+  
+  annotations <- data.frame(Set = filtered %>% distinct(gene, Set) %>% pull(Set))
+  rownames(annotations) <- rownames(filtered)
+
+  return(list(results = filtered, sets = annotations))
+}
+
+violinPlot <- function(data, wilcox) {
+  
+  longData <- data$results %>% 
+  pivot_longer(cols = c(GC1, GC2, GC3), names_to = "GC_type", values_to = "GC_value")
+  # 1) Get max y per facet for bracket placement
+  max_y <- longData %>%
+    group_by(GC_type) %>%
+    summarise(y_max = max(GC_value, na.rm = TRUE), .groups = "drop")
+
+  # 2) Data frame for stat_pvalue_manual
+  pvals_for_plot <- wilcox %>%
+    left_join(max_y, by = "GC_type") %>%
+    group_by(GC_type) %>%
+    mutate(
+      p = p.value,
+      y.position = y_max + 0.02 + 0.03 * row_number()
+    ) %>%
+    ungroup()
+
+  # 3) Violin plot
+  violin <- ggplot(longData, aes(x = Set, y = GC_value, fill = Set)) +
+    geom_violin(trim = FALSE, alpha = 0.7) +
+    geom_boxplot(width = 0.1, outlier.shape = NA, fill = "white") +
+    labs(
+      x = "Expression Category",
+      y = "GC Fraction"
+    ) +
+    facet_wrap(~ GC_type) +
+    theme_minimal()
+
+  # 4) Add p-values
+  violinP <- violin +
+    stat_pvalue_manual(
+      pvals_for_plot,
+      label = "p",
+      tip.length = 0.01,
+      step.increase = 0,
+      size = 2
+    )
+
+  violinP
+}
+
+
+getWilcox <- function(data) {
+  
+  data_long <- data$results %>%
+  
+  pivot_longer(cols = c(GC1, GC2, GC3), names_to = "GC_type", values_to = "GC_value")
+    
+  data_long$Set <- factor(data_long$Set, levels = c("NoChange", "Up", "Down"))
+  
+  wilcoxon <- data_long %>%
+  group_by(GC_type) %>%
+  group_modify(~ {
+    pw <- pairwise.wilcox.test(
+      x = .x$GC_value,
+      g = .x$Set,
+      p.adjust.method = "BH",
+      paired = FALSE,
+      exact = FALSE
+    )
+    broom::tidy(pw)
+  }) %>%
+  ungroup()
+  
+  return(wilcoxon)
+  
+}
+
+sig_codons <- function(data){
+  freq_long <- data$results %>%
+    pivot_longer(cols = -gene,
+                 names_to = "codon",
+                 values_to = "frequency")
+  
+  annot <- data$sets %>%
+    rownames_to_column(var="gene")
+  
+  freq_annot <- freq_long %>%
+    left_join(
+      annot, by="gene"
+    )
+  
+  freq_results <- freq_annot %>%
+    group_by(codon,Set) %>%
+    summarise(
+      mean_freq = mean(frequency, na.rm=TRUE),
+      se_freq = sd(frequency, na.rm = TRUE) / sqrt(n()),
+      n = n(),
+      .groups = "drop"
+    )
+  
+  codon_stats <- freq_annot %>%
+    group_by(codon) %>%
+    summarise(
+      p_value = kruskal.test(frequency ~ Set)$p.value,
+      .groups = "drop"
+    )
+  
+  codon_stats <- codon_stats %>%
+    mutate(padj = p.adjust(p_value, method = "fdr"))
+  
+  freq_results <- left_join(freq_results, codon_stats, by = "codon")
+  
+  freq_results <- freq_results %>%
+    mutate(
+      GC_percent = str_count(codon, "[GCgc]") / 3 * 100
+    )
+  
+  df_wide <- freq_results %>%
+    dplyr::select(codon, Set, mean_freq, se_freq) %>%
+    pivot_wider(
+      names_from  = Set,
+      values_from = c(mean_freq, se_freq)
+    ) 
+  
+  df_wide <- df_wide %>%
+    dplyr::rename(
+      up_mean       = mean_freq_Up,
+      down_mean     = mean_freq_Down,
+      nochange_mean = mean_freq_NoChange,
+      up_se         = se_freq_Up,
+      down_se       = se_freq_Down,
+      nochange_se   = se_freq_NoChange
+    )
+  
+  # 2. make a codon→GC lookup (one row per codon)
+  gc_lookup <- freq_results %>%
+    dplyr::select(codon, GC_percent) %>%
+    distinct()
+  
+  pvalue_lookup <- freq_results %>%
+    dplyr::select(codon,padj) %>%
+    distinct()
+  
+  # 3. join it on
+  df_wide2 <- df_wide %>%
+    left_join(gc_lookup, by = "codon")
+  
+  df_wide3 <- df_wide2 %>%
+    left_join(pvalue_lookup, by = "codon")
+  
+  return(list(res_long=freq_results,
+              res_wide=df_wide3))
+  
+}
+
+```
+
+Run:
+TSL
+```{r}
+tsl_lists <- gen_gene_lists(tsl_results)
+tsl_codon_results <- filter_genes(usage, tsl_lists)
+wcxTsl<-getWilcox(tsl_codon_results)
+tsl_vio<-violinPlot(tsl_codon_results, wcxTsl)
+
+
+ggsave(
+  filename = file.path(output_dir,"GC_Per_Position_TSL.pdf"),
+  plot= tsl_vio,
+  width = 6,
+  height = 3,
+  units = "in"
+)
+
+rna_lists <- gen_gene_lists(rna_results)
+rna_codon_results <- filter_genes(usage, rna_lists)
+wcxTslRNA<-getWilcox(rna_codon_results)
+rna_vio<-violinPlot(rna_codon_results, wcxTslRNA)
+
+
+ggsave(
+  filename = file.path(output_dir,"GC_Per_Position_RNA.pdf"),
+  plot= rna_vio,
+  width = 6,
+  height = 3,
+  units = "in"
+)
+```

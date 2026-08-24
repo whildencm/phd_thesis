@@ -1,0 +1,452 @@
++---
+title: "ASO_chimeclip_analysis"
+author: "Courtney Whilden"
+date: "2026-02-25"
+output: html_document
+---
+The goal of this analysis is to count per-snoRNA chimeras within Nm-snoRNA peaks,
+Snord116 peaks, and Snord101 peaks. This will allow me to assess how steric blocking
+ASOs affect individual snoRNA interactions.
+
+## Pre-processing
+1. Chimeric mapping was done in parallel with other samples:
+  chimeric_mapping_peak_calling.Rmd
+2. eCLIP done in parallel with other samples:
+
+```{r}
+library(tidyverse, quietly=TRUE)
+library(ggplot2, quietly=TRUE)
+library(tools, quietly=TRUE)
+library(ggrepel, quietly=TRUE)
+```
+
+```{r setup}
+# Project directory
+clusterRoot <- "/n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2"
+macRoot     <- "/Volumes/whipple_lab/Users/cwhilden/PROJECTS/THESIS/chapter2"
+
+# Import whilden plot settings
+plotSave <- function(plotVar, fileName, outSave=outDir, w=1.5, h=1.5){
+  ggsave(
+  filename = file.path(outSave,fileName),
+  plot = plotVar,
+  device = "pdf",
+  width = w,
+  height = h,
+  units = "in"
+  )
+}
+
+# PLOT THEME
+paletteCW <- c(
+  Pink_CW      = "#EC008C",
+  Teal_CW      = "#008C8C",
+  Charcoal_CW  = "#2E2E2E",
+  LimeGreen_CW = "#9BC53D",
+  SoftOrange_CW= "#F4A261",
+  Purple_CW    = "#7B2CBF"
+)
+
+themeCW <- function(baseSize = 6) {
+  theme_minimal(base_size = baseSize) %+replace%
+    theme(
+      # panel
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(fill = NA, colour = "black", size = 0.5),
+      
+      # axes lines/ticks/text
+      axis.line = element_blank(),                      # border handles the visual frame
+      axis.ticks = element_line(size = 0.5),
+      axis.ticks.length = unit(0.03, "in"),
+      axis.text = element_text(size = baseSize, colour = "black"),
+      axis.title = element_text(size = baseSize, colour = "black"),
+      
+      # legend
+      legend.key        = element_blank(),
+      legend.background = element_blank(),
+      legend.text       = element_text(size = baseSize),
+      legend.title = element_blank(),
+      
+      legend.key.size   = unit(0.2, "cm"),
+      legend.spacing.y  = unit(1, "pt"),
+      legend.margin     = margin(0, 0, 0, 0, unit = "pt"),
+      legend.position = "top",
+      
+      # plot text & margins
+      plot.title = element_text(size = baseSize, colour = "black"),
+      plot.subtitle = element_text(size = baseSize, colour = "black"),
+      plot.margin = margin(5, 5, 5, 5, unit = "pt"),
+      
+      aspect.ratio=1
+    )
+  
+}
+```
+## Counting
+
+1. I need a .saf file of all significant peaks for the snoRNAs of interest.
+Required input: summaryFiles/All_Samples_Significant_Peak_Results.csv
+
+```{r}
+clusterRoot<-"/n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2"
+macRoot<-"/Volumes/whipple_lab-1/Users/cwhilden/PROJECTS/THESIS/chapter2"
+
+
+peaks<-read_csv(file.path(macRoot,"summaryFiles/peakSummaryFiles/All_Samples_Significant_Peak_Results.csv"))
+
+# Pull known, Snord101, and Snord116 peaks
+peaksFiltered <- peaks %>%
+  # Filter for SSEXPT8 samples
+  filter(sample=='SSEXPT8_IP_A_S3_R1_001') %>%
+  # Keep known, Snord116, and Snord101 peaks
+  filter(snoRNA=='Snord101_Gm23130' | snoRNA=='Snord116_Snord116l2' | peakStatus =='known') %>%
+  # Keep significant peaks only
+  filter(log2_fold_change>=1.5 & fraction>=0.1) %>%
+  # Keep rRNA peaks only
+  filter(targetClass=='rRNA') %>%
+  # Generate peak id
+  mutate(peakId=paste0(snoRNA,';',chromosome,'_',start,'_',end))
+  
+
+#Build saf file from filtered peak data
+saf <- data.frame(
+  GeneID=peaksFiltered$peakId,
+  Chr=peaksFiltered$chromosome,
+  Start=peaksFiltered$start,
+  End=peaksFiltered$end,
+  Strand='+'
+)
+
+# Export saf file
+write.table(
+  saf,
+  file = file.path(macRoot,"summaryFiles/stericblocking/peaks.saf"),
+  sep = "\t",
+  quote = FALSE,
+  row.names = FALSE,
+  col.names = TRUE
+)
+
+```
+
+2. Count chimeric reads within each peak
+```{bash, eval=FALSE}
+# Start interactive session
+salloc -p whipple -c 10 --mem 50G -t 300
+
+cd /n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2
+
+#Load conda environment
+module load Mambaforge
+mamba activate /n/whipple_lab/share_root/Users/cwhilden/ENVS/chimericCW_001
+
+# Define data directories
+saf=summaryFiles/stericblocking/peaks.saf # saf file of significant peaks
+bamDir="results/mapChimeras" # chimeric .bam file directory
+bamFiles="${bamDir}"/IGS_CW*.rRNA*.bam # select rRNA chimeric bams from steric block expt
+outDir=results/stericBlocking # write output
+mkdir -p $outDir
+
+# Run feature counts on all .bam files
+for file in $bamFiles; do
+  base=$(basename "$file" .bam)
+
+  featureCounts \
+    -O \
+    -T 8 \
+    -F SAF \
+    -a $saf \
+    -o "${outDir}/${base}.count.txt" \
+    "$file"
+done
+
+mamba deactivate
+exit
+```
+
+3. Generate summary file
+Required inputs: feature counts files from above code chunk,
+summaryFiles/chimericCounts/All_ChimeraCounts.csv
+```{r, eval=FALSE}
+# Define paths
+allChimeraFile <- file.path(macRoot,"summaryFiles/chimericCounts/All_ChimeraCounts.csv")
+sampleInfoFile<-file.path(macRoot,"references/sampleAlias.csv")
+countDir<-file.path(macRoot,"results/stericBlocking") # output of feature counts
+
+samples <- c("IGS_CW_2IP_CKDL250021054-1A_22W7L3LT4_L4_1.sno",
+             "IGS_CW_4IP_CKDL250021054-1A_22W7L3LT4_L4_1.sno",
+             "IGS_CW_1IP_CKDL250021054-1A_22W7L3LT4_L4_1.sno",
+             "IGS_CW_3IP_CKDL250021054-1A_22W7L3LT4_L4_1.sno"
+)
+
+
+###########
+# Function to combine counts across multiple samples into one data frame
+# Read in feature counts data
+dataFiles <- list.files(path = countDir, 
+                        pattern = "\\.count.txt$", 
+                        full.names = TRUE)
+
+
+# Extract sample/snoRNA information from filename
+names<-sub("\\.count.txt$","",basename(dataFiles))
+
+# Strip sample and snoRNA from file name
+sampleNames <-str_extract(names, "^[^.]+")
+snoNames <- str_extract(names, "[^.]+(?=\\.chimeras)")
+bamId<-paste0(sampleNames,";",snoNames)
+
+# generate a named list of counts
+data <- purrr::set_names(dataFiles, bamId) %>%
+  purrr::map(~ readr::read_tsv(.x, show_col_types = FALSE, skip=1))
+  
+# Merge named list into a single data frame
+allData <- data[[1]][,1, drop=FALSE]
+
+for (i in seq_along(bamId)) {
+  # Read in counts column (column 7)
+  allData[[bamId[i]]] <- data[[i]][,7, drop=TRUE]
+  
+} 
+
+data_long= allData %>%
+  pivot_longer(all_of(bamId),
+               names_to="bamId",
+               values_to="count_chimera") 
+# Read in sample alias
+sampleAlias<-read_csv(sampleInfoFile)
+# Pull out relevant bam files & chimeras
+data_long2 <- data_long %>%
+  # Pull peak snoRNA and chimeric bam snoRNA from file names
+  separate(Geneid, into = c("peak_snoRNA", "peak_ID"), sep = ";") %>%
+  separate(bamId, into = c("sample", "bam_snoRNA"), sep = ";") %>%
+  # Match sample alias to sample name
+  left_join(sampleAlias, by='sample') %>%
+  # Keep rows where the peakID snoRNA equals the bam file snoRNA
+  filter(peak_snoRNA==bam_snoRNA) %>%
+  # keep relevant count rows
+  select(all_of(c(
+    'alias',
+    'peak_snoRNA',
+    'peak_ID',
+    'count_chimera'
+  )))
+
+
+#### CPM
+# Get total rRNA chimeras for normalization
+allChimera<-read_csv(allChimeraFile) %>%
+  filter(target=='rRNA') %>%
+  filter(snoRNA %in% data_long2$peak_snoRNA) %>%
+  select(all_of(samples)) %>%
+  # Get rid of .sno from each file name
+  rename_with(~ str_remove(.x, "\\.sno"))
+
+
+
+# Get rRNA totals for evaluated snoRNAs
+chimeraSums <- as.data.frame(colSums(allChimera))
+colnames(chimeraSums)<-"count_total"
+
+# Match sample alias
+chimeraSums <- chimeraSums %>%
+  rownames_to_column("sample") %>%
+  left_join(sampleAlias, by = "sample")
+
+
+######## 
+# Match total rRNA chimeric counts
+data_long3 <- data_long2 %>%
+  left_join(chimeraSums,by='alias') %>%
+  mutate(CPM=(count_chimera / count_total) * 1e6,
+         peak=paste0(peak_snoRNA,';',peak_ID))
+
+
+data_final <- data_long3 %>%
+  select(all_of(c('alias','CPM','peak','peak_snoRNA'))) %>%
+  pivot_wider(
+    names_from  = alias,
+    values_from = CPM
+  ) %>%
+  mutate(snoColor=case_when(peak_snoRNA=='Snord116_Snord116l2' ~ 'Snord116',
+                   peak_snoRNA=='Snord101_Gm23130' ~ 'Snord101',
+                   TRUE ~ 'other'))
+
+
+write.csv(data_final,
+          file.path(macRoot,"summaryFiles/stericblocking/StericBlockCounts.csv"))
+```
+
+## Plots
+```{r}
+macRoot<-"/Volumes/whipple_lab/Users/cwhilden/PROJECTS/THESIS/chapter2"
+data<-read_csv(file.path(macRoot,"summaryFiles/stericblocking/StericBlockCounts.csv")) %>%
+  filter(if_all(where(is.numeric), ~ .x > 0))
+
+# Calculate log2fc
+data$ase101_ctl<-(log2(data$Steric_ase101_RepA/data$Steric_noASO_RepA))
+data$aseD_ctl<-(log2(data$Steric_aseD_RepA/data$Steric_noASO_RepA))
+data$aseDp_ctl<-(log2(data$Steric_aseDp_RepA/data$Steric_noASO_RepA))
+
+
+plot101<- data %>%
+  ggplot(aes(x=log2(Steric_noASO_RepA),
+             y=log2(Steric_ase101_RepA),
+             color=snoColor)) +
+  scale_x_continuous(limits = c(0, NA)) +
+  scale_y_continuous(limits = c(0, NA)) +
+  geom_point(size=1.5) +
+  geom_abline(slope=1,intercept=0) +
+  geom_text_repel(
+    data = . %>% filter(snoColor %in% c("Snord101", "Snord116")),
+    aes(label = peak),
+    size=2) +
+  themeCW()
+
+outDir<-file.path(macRoot,"plots/stericblocking")
+plotSave(plot101,"ASESnord101_v_noASO_log2CPM.pdf")
+plot101
+```
+
+```{r}
+plot_aseD<- data %>%
+  ggplot(aes(x=log2(Steric_noASO_RepA),
+             y=log2(Steric_aseD_RepA),
+             color=snoColor)) +
+  scale_x_continuous(limits = c(0, NA)) +
+  scale_y_continuous(limits = c(0, NA)) +
+  geom_point(size=1.5) +
+  geom_abline(slope=1,intercept=0) +
+  geom_text_repel(
+    data = . %>% filter(snoColor %in% c("Snord101", "Snord116")),
+    aes(label = peak),
+    size=2) +
+  themeCW()
+
+outDir<-file.path(macRoot,"plots/stericblocking")
+plotSave(plot_aseD,"ASED_v_noASO_log2CPM.pdf")
+plot_aseD
+
+```
+
+```{r}
+plot_aseDp<- data %>%
+  ggplot(aes(x=log2(Steric_noASO_RepA),
+             y=log2(Steric_aseDp_RepA),
+             color=snoColor)) +
+  scale_x_continuous(limits = c(0, NA)) +
+  scale_y_continuous(limits = c(0, NA)) +
+  geom_point(size=1.5) +
+  geom_abline(slope=1,intercept=0) +
+  geom_text_repel(
+    data = . %>% filter(snoColor %in% c("Snord101", "Snord116")),
+    aes(label = peak),
+    size=2) +
+  themeCW()
+
+outDir<-file.path(macRoot,"plots/stericblocking")
+plotSave(plot_aseDp,"ASEDp_v_noASO_log2CPM.pdf")
+plot_aseDp
+```
+# waterfall plots of log2 fold change values
+```{r}
+waterfall <- function(data, sampleColumn) {
+
+  # get symmetric axis limit
+  axis_limit <- max(abs(data[[sampleColumn]]), na.rm = TRUE)
+  
+  data %>%
+    arrange(.data[[sampleColumn]]) %>%
+    mutate(
+      
+      label = ifelse(snoColor != "other",peak, NA),
+      peak  = factor(peak, levels = peak)
+    ) %>%
+    ggplot(aes(x = peak, y = .data[[sampleColumn]], fill = snoColor)) +
+    geom_bar(stat = "identity", width = 0.8) +
+    geom_hline(yintercept = 0, linewidth = 0.4, color = "black") +
+    geom_text(aes(label = label,
+                  vjust = ifelse(.data[[sampleColumn]] > 0, -0.4, 1.2)),
+              size = 1, na.rm = TRUE) +
+    scale_y_continuous(limits = c(-axis_limit, axis_limit)) +
+    theme_classic() +
+    theme(
+      axis.text.x  = element_blank(),
+      axis.ticks.x = element_blank(),
+      legend.position = "top"
+    ) +
+    labs(
+      x     = "Peaks (ranked by fold change)",
+      y     = "log2 (ASO / no ASO)",
+      fill  = "snoRNA",
+      title = paste0("Ranked Fold Change: ", sampleColumn)
+    )
+}
+
+
+
+
+plotSave(waterfall(data, "ase101_ctl") + themeCW(),
+         "ASE101_log2FC_waterfall.pdf",
+         w=4, h=2)
+
+plotSave(waterfall(data, "aseD_ctl") + themeCW(),
+         "ASED_log2FC_waterfall.pdf",
+         w=4, h=2)
+
+plotSave(waterfall(data, "aseDp_ctl") + themeCW(),
+         "ASEDp_log2FC_waterfall.pdf",
+         w=4, h=2)
+```
+
+# Get chimeric RPM bigWigs for IGV
+
+```{bash, eval=FALSE}
+# Start interactive session
+salloc -p whipple -c 4 --mem 50G -t 300
+cd /n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2
+# Load environment
+module load Mambaforge
+mamba activate /n/whipple_lab/share_root/Users/cwhilden/ENVS/chimericCW_001 
+
+# Run chimeric bam2bw script on desired bam file:
+totalChimerasFile="summaryFiles/chimericCounts/ChimerasPerClass_AllSamples.csv"
+bamDir="results/mapChimeras"
+bwDir="results/stericBlockingCPM_BW"
+mkdir -p $bwDir
+
+# make rRNA and snRNA tracks
+samples=(IGS_CW_1IP_CKDL250021054-1A_22W7L3LT4_L4_1 \
+IGS_CW_2IP_CKDL250021054-1A_22W7L3LT4_L4_1 \
+IGS_CW_3IP_CKDL250021054-1A_22W7L3LT4_L4_1 \
+IGS_CW_4IP_CKDL250021054-1A_22W7L3LT4_L4_1
+)
+
+for sample in "${samples[@]}"; do
+
+  # snord116
+  scripts/chimericBam2bw_cpm.sh $totalChimerasFile \
+  ${sample} \
+  ${bamDir}/${sample}.snoRNA.rRNA.Snord116_Snord116l2.chimeras.bam \
+  ${bwDir}/${sample}.Snord116.rRNA.cpm.bw \
+  ${bwDir}/${sample}.Snord116.rRNA.cpm.bw.log
+
+  #snRNA chimeras
+  scripts/chimericBam2bw_cpm.sh $totalChimerasFile \
+  ${sample} \
+  ${bamDir}/${sample}.snoRNA.rRNA.Snord101_Gm23130.chimeras.bam \
+  ${bwDir}/${sample}.Snord101.rRNA.cpm.bw \
+  ${bwDir}/${sample}.Snord101.rRNA.cpm.bw.log
+  
+  #all snoRNA chimeras
+  scripts/chimericBam2bw_cpm.sh $totalChimerasFile \
+  ${sample} \
+  ${bamDir}/${sample}.snoRNA.rRNA.chimeras.bam \
+  ${bwDir}/${sample}.AllSnoChimeras.rRNA.cpm.bw \
+  ${bwDir}/${sample}.AllSnoChimeras.rRNA.cpm.bw.log
+
+
+done
+```

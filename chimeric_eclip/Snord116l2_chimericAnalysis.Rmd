@@ -1,0 +1,828 @@
+---
+title: "Snord116l2_chimericAnalysis"
+author: "Courtney Whilden"
+date: "2026-03-12"
+output: html_document
+---
+
+1. Load packages
+```{r}
+library(tidyverse, quietly=TRUE)
+library(ggplot2, quietly=TRUE)
+library(tools, quietly=TRUE)
+library(ggrepel, quietly=TRUE)
+library(ggVennDiagram,quietly = TRUE)
+```
+
+2. Set up plot themes
+```{r}
+# Project directory
+clusterRoot <- "/n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2"
+macRoot     <- "/Volumes/whipple_lab/Users/cwhilden/PROJECTS/THESIS/chapter2"
+
+# PLOT THEME
+paletteCW <- c(
+  Pink_CW      = "#EC008C",
+  Teal_CW      = "#008C8C",
+  Charcoal_CW  = "#2E2E2E",
+  LimeGreen_CW = "#9BC53D",
+  SoftOrange_CW= "#F4A261",
+  Purple_CW    = "#7B2CBF"
+)
+
+themeCW <- function(baseSize = 6) {
+  theme_minimal(base_size = baseSize) %+replace%
+    theme(
+      # panel
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(fill = NA, colour = "black", size = 0.5),
+      
+      # axes lines/ticks/text
+      axis.line = element_blank(),                      # border handles the visual frame
+      axis.ticks = element_line(size = 0.5),
+      axis.ticks.length = unit(0.03, "in"),
+      axis.text = element_text(size = baseSize, colour = "black"),
+      axis.title = element_text(size = baseSize, colour = "black"),
+      
+      # legend
+      legend.key        = element_blank(),
+      legend.background = element_blank(),
+      legend.text       = element_text(size = baseSize),
+      legend.title = element_blank(),
+      
+      legend.key.size   = unit(0.2, "cm"),
+      legend.spacing.y  = unit(1, "pt"),
+      legend.margin     = margin(0, 0, 0, 0, unit = "pt"),
+      legend.position = "top",
+      
+      # plot text & margins
+      plot.title = element_text(size = baseSize, colour = "black"),
+      plot.subtitle = element_text(size = baseSize, colour = "black"),
+      plot.margin = margin(5, 5, 5, 5, unit = "pt"),
+      
+      aspect.ratio=1
+    )
+}
+
+
+######################################
+# Function to save plots in my preferred size
+plotSave <- function(plotVar, fileName, outSave=outDir){
+  ggsave(
+  filename = file.path(outSave,fileName),
+  plot = plotVar,
+  device = "pdf",
+  width = 1.5,
+  height = 1.5,
+  units = "in"
+  )
+}
+```
+
+
+3. Import Snord116 peaks
+Set input paths
+```{r}
+# iNeuron replicates
+data_repA <- read_csv(file.path(macRoot,"summaryFiles/peakSummaryFiles/SSEXPT8_IP_A_S3_R1_001_Significant_Peak_Results.csv"))
+data_repB <- read_csv(file.path(macRoot,"summaryFiles/peakSummaryFiles/SSEXPT8_IP_B_S4_R1_001_Significant_Peak_Results.csv"))
+
+# pNeuron probe-enriched
+data_probe <- read_csv(file.path(macRoot,"summaryFiles/peakSummaryFiles/TDZ-7_S7_R1_001_Significant_Peak_Results.csv"))
+
+# Read in Nm snoRNA annotation file
+
+Nm <- read_csv(file.path(macRoot,"references/Known_Nm_snoRNAs.csv"))
+```
+
+Join iNeuron replicates
+```{r}
+# Add peak ID containing snoRNA name and peak coordinates
+addPeakID <- function(data) {
+  
+  data$peakID <- paste0(data$snoRNA,";",data$chromosome,"_",data$start,"_",data$end)
+  
+  return(data)
+  
+}
+
+data_repA <- addPeakID(data_repA)
+data_repB <- addPeakID(data_repB)
+data_probe <- addPeakID(data_probe)
+# Filter to peakID and fraction values
+filterData <- function(data) {
+  
+  data <- data %>% filter(snoRNA=='Snord116_Snord116l2')
+  
+  data2 <- data %>%
+    select(all_of(c("peakID","fraction","log2_fold_change")))
+  
+  return(data2) 
+  
+}
+
+A_filter <- filterData(data_repA)
+colnames(A_filter)[2]<-"fracRepA"
+colnames(A_filter)[3]<-"l2fcA"
+
+B_filter <- filterData(data_repB)
+colnames(B_filter)[2]<-"fracRepB"
+colnames(B_filter)[3]<-"l2fcB"
+
+probe_filter <- filterData(data_probe)
+colnames(probe_filter)[2]<-"fracProbe"
+colnames(probe_filter)[3]<-"l2fcProbe"
+
+# Join replicates into one data frame
+data_join <- left_join(A_filter, B_filter, by='peakID')
+
+data_join[is.na(data_join)] <- 0
+
+data_join <- data_join %>%
+  mutate(avg_l2fc=(l2fcA+l2fcB)/2,
+         avg_frac=(fracRepA+fracRepB)/2)
+
+data_probe <- probe_filter %>%
+  mutate(is_sig=if_else(fracProbe>=0.1 & l2fcProbe>=1.5, "Sig","ns"))
+
+
+data_iN <- data_join %>%
+  mutate(is_sig=if_else(avg_frac>=0.1 & avg_l2fc>=1.5, "Sig","ns"))
+```
+
+Plot iN replicates
+```{r}
+plot <- ggplot(data_iN, aes(x = avg_l2fc, y = avg_frac, color = is_sig)) +
+  geom_point(alpha = 0.8, size = 1.5) +
+  labs(
+    x = "log2(Peak fold enrichment)",
+    y = "Fraction of chimeras in peak"
+  ) +
+  geom_text_repel(
+    data = subset(data_iN, is_sig=='Sig'),     # Only label significant points
+    aes(label = peakID),
+    size = 1
+  ) +
+  geom_vline(xintercept = 1.5) +
+  geom_hline(yintercept = 0.1) +
+  themeCW()
+
+outDir<-file.path(macRoot,"plots/Snord116_chimeras")
+dir.create(outDir, recursive=TRUE)
+
+plotSave(plot,"iNeuron_Snord116Peaks_fraction_v_l2fc.pdf")
+
+plot
+```
+# Export .bed files of significant peaks:
+```{r}
+bed_df <- data_iN %>%
+  filter(is_sig == "Sig") %>%
+  mutate(
+    # Get the second part after the semicolon
+    peak_coords = sub(".*;", "", peakID),
+    # Split into chromosome, start, end
+    chrom = sub("_\\d+_\\d+$", "", peak_coords),
+    start = as.integer(sub(".*_(\\d+)_\\d+$", "\\1", peak_coords)),
+    end = as.integer(sub(".*_(\\d+)$", "\\1", peak_coords))
+  ) %>%
+  select(chrom, start, end)
+
+# Write to BED file (tab-separated, no header)
+write_tsv(bed_df, 
+          file.path(macRoot,"summaryFiles/peakSummaryFiles/iNeuron_sigSnord116_peaks.bed"), col_names = FALSE)
+
+bed_df_probe <- data_probe %>%
+  filter(is_sig == "Sig") %>%
+  mutate(
+    # Get the second part after the semicolon
+    peak_coords = sub(".*;", "", peakID),
+    # Split into chromosome, start, end
+    chrom = sub("_\\d+_\\d+$", "", peak_coords),
+    start = as.integer(sub(".*_(\\d+)_\\d+$", "\\1", peak_coords)),
+    end = as.integer(sub(".*_(\\d+)$", "\\1", peak_coords))
+  ) %>%
+  select(chrom, start, end)
+
+write_tsv(bed_df_probe, 
+          file.path(macRoot,"summaryFiles/peakSummaryFiles/ProbeEnriched_sigSnord116_peaks.bed"), col_names = FALSE)
+```
+
+
+## Export chimeric RPM bw tracks for snord116 chimeras
+```{bash, eval=FALSE}
+# Start interactive session
+salloc -p whipple -c 4 --mem 50G -t 300
+
+# Load environment
+module load Mambaforge
+mamba activate /n/whipple_lab/share_root/Users/cwhilden/ENVS/chimericCW_001 
+
+cd /n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2
+# Run chimeric bam2bw script on desired bam file:
+totalChimerasFile="summaryFiles/chimericCounts/ChimerasPerClass_AllSamples.csv"
+bamDir="results/mapChimeras"
+bwDir="results/Snord116_CPM_BW"
+mkdir -p $bwDir
+
+# make rRNA and snRNA tracks
+samples=(SSEXPT8_IP_A_S3_R1_001 SSEXPT8_IP_B_S4_R1_001 TDZ-7_S7_R1_001)
+
+
+for sample in "${samples[@]}"; do
+
+  # rRNA chimeras
+  scripts/chimericBam2bw_cpm.sh $totalChimerasFile \
+  ${sample} \
+  ${bamDir}/${sample}.snoRNA.rRNA.Snord116_Snord116l2.chimeras.bam \
+  ${bwDir}/${sample}.Snord116.rRNA.cpm.bw \
+  ${bwDir}/${sample}.Snord116.rRNA.cpm.log
+
+  #snRNA chimeras
+  scripts/chimericBam2bw_cpm.sh $totalChimerasFile \
+  ${sample} \
+  ${bamDir}/${sample}.snoRNA.snRNA.Snord116_Snord116l2.chimeras.bam \
+  ${bwDir}/${sample}.Snord116.chimeras.snRNA.cpm.bw \
+  ${bwDir}/${sample}.Snord116.chimeras.snRNA.cpm.log
+  
+  # tRNA
+  scripts/chimericBam2bw_cpm.sh $totalChimerasFile \
+  ${sample} \
+  ${bamDir}/${sample}.snoRNA.tRNA.Snord116_Snord116l2.chimeras.bam \
+  ${bwDir}/${sample}.Snord116.tRNA.cpm.bw \
+  ${bwDir}/${sample}.Snord116.tRNA.cpm.log
+  
+  
+  
+  # scaRNA
+  scripts/chimericBam2bw_cpm.sh $totalChimerasFile \
+  ${sample} \
+  ${bamDir}/${sample}.snoRNA.scaRNA.Snord116_Snord116l2.chimeras.bam \
+  ${bwDir}/${sample}.Snord116.scaRNA.cpm.bw \
+  ${bwDir}/${sample}.Snord116.scaRNA.cpm.log
+
+done
+
+# I also want to grab all snoRNA chimeric files for these samples:
+for sample in "${samples[@]}"; do
+
+  # rRNA chimeras
+  scripts/chimericBam2bw_cpm.sh $totalChimerasFile \
+  ${sample} \
+  ${bamDir}/${sample}.snoRNA.rRNA.chimeras.bam \
+  ${bwDir}/${sample}.snoRNA.AllChimera.rRNA.cpm.bw \
+  ${bwDir}/${sample}.snoRNA.AllChimera.rRNA.cpm.log
+
+  #snRNA chimeras
+  scripts/chimericBam2bw_cpm.sh $totalChimerasFile \
+  ${sample} \
+  ${bamDir}/${sample}.snoRNA.snRNA.chimeras.bam \
+  ${bwDir}/${sample}.snoRNA.AllChimera.snRNA.cpm.bw \
+  ${bwDir}/${sample}.snoRNA.AllChimera.snRNA.cpm.log
+  
+  # tRNA
+  scripts/chimericBam2bw_cpm.sh $totalChimerasFile \
+  ${sample} \
+  ${bamDir}/${sample}.snoRNA.tRNA.chimeras.bam \
+  ${bwDir}/${sample}.snoRNA.AllChimera.tRNA.cpm.bw \
+  ${bwDir}/${sample}.snoRNA.AllChimera.tRNA.cpm.log
+  
+  
+  
+  # scaRNA
+  scripts/chimericBam2bw_cpm.sh $totalChimerasFile \
+  ${sample} \
+  ${bamDir}/${sample}.snoRNA.scaRNA.Snord116_Snord116l2.chimeras.bam \
+  ${bwDir}/${sample}.snoRNA.AllChimera.scaRNA.cpm.bw \
+  ${bwDir}/${sample}.snoRNA.AllChimera.scaRNA.cpm.log
+
+done
+
+
+```
+## Analysis of genome-mapped chimeras
+1. Quantify chimeras per gene
+Reads overlapping multiple gene ids are not countes
+```{bash, eval=FALSE}
+# Start interactive session
+salloc -p whipple -c 10 --mem 50G -t 300
+
+# Load environment
+module load Mambaforge
+mamba activate /n/whipple_lab/share_root/Users/cwhilden/ENVS/chimericCW_001 
+
+# Set paths
+cd /n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2
+gtf=references/gencode.vM38.primary_assembly.annotation.gtf
+inDir=results/mapChimeras
+outDir=results/Snord116_countGenomeChimeras
+mkdir -p $outDir
+
+samples=(SSEXPT8_IP_A_S3_R1_001 SSEXPT8_IP_B_S4_R1_001 TDZ-7_S7_R1_001)
+for sample in ${samples[@]}; do
+  featureCounts -T 10 -F GTF -a $gtf \
+  -o ${outDir}/${sample}.genome.counts.txt \
+  ${inDir}/${sample}.snoRNA.genome.Snord116_Snord116l2.chimeras.bam
+done
+
+# Count input
+clipSample=(SSEXPT8_IN_A_S1_R1_001 SSEXPT8_IN_B_S2_R1_001 TDZ-3_S3_R1_001)
+clipIn=results/mapCLIP
+
+for sample in ${clipSample[@]}; do
+  featureCounts -T 10 -F GTF -a $gtf \
+  -o ${outDir}/${sample}.genome.clip.counts.txt \
+  ${clipIn}/${sample}.clip.genomeAligned.out.sort.bam
+done
+
+
+```
+
+
+
+## Chimeras per category
+```{r}
+allChimeras<-read_csv(file.path(macRoot,"summaryFiles/chimericCounts/ChimerasPerClass_AllSamples.csv"))
+
+geneAnnotations<-read_tsv(file.path(macRoot,"references/mus_musculus.gene_info"))
+geneAnnotations$Geneid <- sub(".*Ensembl:([^|]+).*", "\\1", geneAnnotations$dbXrefs) 
+geneAnnotations<-geneAnnotations%>%
+  select(all_of(c('Geneid','Symbol','type_of_gene')))
+
+# Get the number of chimeras that map to protein-coding genes ('pre-mRNA')
+breakdownGenome <- function (dataFile,
+                             annot=geneAnnotations,
+                             columnNames){
+  
+  data <-read_tsv(dataFile, skip=1) %>%
+    select(Geneid,last_col())
+  
+  colnames(data)<-c('Geneid','counts')
+
+  data_clean <-  data %>%
+  mutate(Geneid = sub("\\..*$", "", Geneid))
+  
+  annot<-left_join(data_clean,annot,by='Geneid') 
+  
+  annot_summary<- annot %>%
+  group_by(type_of_gene) %>%
+  summarise(sum(counts))
+  
+  colnames(annot_summary)<-columnNames
+  
+  return(annot_summary)
+  
+}
+
+probe<- breakdownGenome(file.path(macRoot,"results/Snord116_countGenomeChimeras/TDZ-7_S7_R1_001.genome.counts.txt"),
+                        columnNames=c('type','TDZ-7_S7_R1_001'))
+
+repA<- breakdownGenome(file.path(macRoot,"results/Snord116_countGenomeChimeras/SSEXPT8_IP_A_S3_R1_001.genome.counts.txt"),
+                        columnNames=c('type','SSEXPT8_IP_A_S3_R1_001'))
+repB<- breakdownGenome(file.path(macRoot,"results/Snord116_countGenomeChimeras/SSEXPT8_IP_B_S4_R1_001.genome.counts.txt"),
+                        columnNames=c('type','SSEXPT8_IP_B_S4_R1_001'))
+
+allGenome <- left_join(probe,repA, by='type') %>%
+  left_join(repB,by='type') %>%
+  mutate(target=case_when(type=='protein-coding' ~ 'premRNA',
+                          type=='pseudo' ~ 'psuedogene',
+                          TRUE ~ 'other_counted'))  %>%
+  group_by(target) %>%
+  summarise(across(where(is.numeric), sum, na.rm = TRUE))
+
+
+# pcg
+allChimeras <- allChimeras %>%
+  select(all_of(c('target','TDZ-7_S7_R1_001','SSEXPT8_IP_A_S3_R1_001','SSEXPT8_IP_B_S4_R1_001'))) %>%
+  filter(target !='total')
+
+# Get counts per category: 
+# Step 1: Sum allGenome columns to get genome_counted
+genome_counted <- allGenome %>%
+  summarise(across(where(is.numeric), sum, na.rm = TRUE)) %>%
+  mutate(target = 'genome_counted') %>%
+  relocate(target)
+
+# Step 2: Calculate genome_uncounted (genome from allChimeras - genome_counted)
+genome_uncounted <- allChimeras %>%
+  filter(target == 'genome') %>%
+  pivot_longer(-target, names_to = 'sample', values_to = 'total') %>%
+  left_join(
+    genome_counted %>% pivot_longer(-target, names_to = 'sample', values_to = 'counted'),
+    by = 'sample'
+  ) %>%
+  mutate(value = total - counted,
+         target = 'genome_uncounted') %>%
+  select(target, sample, value) %>%
+  pivot_wider(names_from = sample, values_from = value)
+
+# Step 3: Combine everything
+allCombined <- allChimeras %>%
+  filter(target != 'genome') %>%   # remove original genome row
+  bind_rows(
+            genome_uncounted,
+            allGenome)
+write.csv(allCombined,file.path(outDir,"Snord116_ChimerasRawPerClass.csv"))
+# Convert to long format, calculate CPM, then plot
+allCombined_CPM <- allCombined %>%
+  pivot_longer(-target, names_to = 'sample', values_to = 'count') %>%
+  group_by(sample) %>%
+  mutate(CPM = count / sum(count) * 1e6) %>%
+  ungroup() %>%
+  mutate(target = factor(target, levels = rev(c('rRNA', 'tRNA', 'snRNA', 
+                                                'scaRNA', 'premRNA', 'psuedogene',
+                                                'genome_counted','other_counted', 'genome_uncounted'))))
+
+wide_percent<- allCombined %>%
+  pivot_longer(-target, names_to = 'sample', values_to = 'count') %>%
+  group_by(sample) %>%
+  mutate(CPM = count / sum(count)) %>%
+  ungroup() %>%
+  select(target, sample, CPM) %>%
+  tidyr::pivot_wider(
+    names_from = sample, 
+    values_from = CPM
+  )
+
+write.csv(wide_percent, file.path(outDir,"Snord116_ChimerasPercentPerClass.csv"))
+  
+# Stacked bar plot
+plot<-ggplot(allCombined_CPM, aes(x = sample, y = CPM, fill = target)) +
+  geom_bar(stat = 'identity') +
+  labs(x = 'Sample', y = 'Chimeras per Million', fill = 'Target') +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  themeCW()
+
+outDir<-file.path(macRoot,"plots/Snord116_chimeras")
+plotSave(plot, "Chimeras_per_targetClass_Snord116.pdf")
+
+plot
+```
+
+
+
+## Peak calling - genomic chimeras
+1. Run clipper
+```{bash, eval=FALSE}
+out=results/genomePeakCalling
+bamDir=results/mapChimeras
+
+sbatch scripts/peakCalling_genomicChimeras.sh $bamDir/SSEXPT8_IP_A_S3_R1_001.snoRNA.genome.Snord116_Snord116l2.chimeras.bam $out
+sbatch scripts/peakCalling_genomicChimeras.sh $bamDir/SSEXPT8_IP_B_S4_R1_001.snoRNA.genome.Snord116_Snord116l2.chimeras.bam $out
+
+sbatch scripts/peakCalling_genomicChimeras.sh $bamDir/Fbl_IP_S2_L12_R1_001.snoRNA.genome.Snord116_Snord116l2.chimeras.bam $out
+sbatch scripts/peakCalling_genomicChimeras.sh $bamDir/TDZ-7_S7_R1_001.snoRNA.genome.Snord116_Snord116l2.chimeras.bam $out
+
+```
+2. Merge peaks
+
+
+```{bash, eval=FALSE}
+salloc -p test -c 4 --mem 50G -t 300
+
+# Load module
+module load Mambaforge
+mamba activate /net/rcstorenfs/ifs/rc_labs/whipple_lab/share_root/Users/cwhilden/ENVS/chimericCW_001
+
+# Merge biological replicates
+cd /n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2
+peak=results/genomePeakCalling
+
+fileA=$peak/SSEXPT8_IP_A_S3_R1_001.Snord116.genomePeaks.bed
+fileB=$peak/SSEXPT8_IP_B_S4_R1_001.Snord116.genomePeaks.bed
+
+# Output "intersection" file
+bedtools intersect -a "$fileA" -b "$fileB" \
+  | bedtools sort -i - \
+  | bedtools merge -d 1 -c 4,5,6,7,8 -o distinct,min,distinct,min,max \
+   > "${peak}/iNeuron_rep_coord_intersect.bed"
+
+# Merge adjacent peak coordinates
+bedtools sort -i $peak/Fbl_IP_S2_L12_R1_001.Snord116.genomePeaks.bed | bedtools merge -d 1 -c 4,5,6,7,8 -o distinct,min,distinct,min,max > $peak/Fbl_IP_S2_L12_R1_001.merge.bed
+bedtools sort -i $peak/TDZ-7_S7_R1_001.Snord116.genomePeaks.bed| bedtools merge -d 1 -c 4,5,6,7,8 -o distinct,min,distinct,min,max > $peak/TDZ-7_S7_R1_001.merge.bed
+
+
+mamba deactivate
+
+```
+
+### Annotate peaks with gene info:
+
+mamba activate clipper3_mm39
+
+#using homer
+gtf=/n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2/references/gencode.vM38.primary_assembly.annotation.gtf
+
+cd results/genomePeakCalling
+annotatePeaks.pl iNeuron_rep_coord_intersect.bed none -gtf $gtf > "iNeuron_rep_coord.annotated.bed"
+
+
+annotatePeaks.pl Fbl_IP_S2_L12_R1_001.merge.bed none -gtf $gtf > "Fbl_IP_S2_L12_R1_001.merge.annotated.bed"
+annotatePeaks.pl TDZ-7_S7_R1_001.merge.bed none -gtf $gtf > "TDZ-7_S7_R1_001.merge.annotated.bed"
+
+
+
+### Normalize peaks to input
+
+```{bash, eval=FALSE}
+
+bamDir=results/mapChimeras
+inputDir=results/mapCLIP
+peakDir=results/genomePeakCalling
+
+sbatch scripts/eCLIP_peakNormalization.sh $bamDir/SSEXPT8_IP_A_S3_R1_001.snoRNA.genome.Snord116_Snord116l2.chimeras.bam \
+$inputDir/SSEXPT8_IN_A_S1_R1_001.clip.genomeAligned.out.sort.bam \
+$peakDir/iNeuron_rep_coord_intersect.bed \
+results/genomePeakCalling
+
+sbatch scripts/eCLIP_peakNormalization.sh $bamDir/SSEXPT8_IP_B_S4_R1_001.snoRNA.genome.Snord116_Snord116l2.chimeras.bam \
+$inputDir/SSEXPT8_IN_B_S2_R1_001.clip.genomeAligned.out.sort.bam \
+$peakDir/iNeuron_rep_coord_intersect.bed \
+results/genomePeakCalling
+
+sbatch scripts/eCLIP_peakNormalization.sh $bamDir/Fbl_IP_S2_L12_R1_001.snoRNA.genome.Snord116_Snord116l2.chimeras.bam \
+$inputDir/Fbl_IN_S1_L12_R1_001.clip.genomeAligned.out.sort.bam \
+$peakDir/Fbl_IP_S2_L12_R1_001.merge.bed \
+results/genomePeakCalling
+
+sbatch scripts/eCLIP_peakNormalization.sh $bamDir/TDZ-7_S7_R1_001.snoRNA.genome.Snord116_Snord116l2.chimeras.bam \
+$inputDir/TDZ-3_S3_R1_001.clip.genomeAligned.out.sort.bam \
+$peakDir/TDZ-7_S7_R1_001.merge.bed \
+results/genomePeakCalling
+
+
+```
+
+
+
+# Summarize peak results
+```{r}
+annotatePeaks <- function(peakDataFile,
+                          peakAnnotFile,
+                          outFile){
+
+  peakData<-read_tsv(peakDataFile,col_names=FALSE)
+  peakAnnot<-read_tsv(peakAnnotFile)
+
+  colnames(peakData)<-c(
+  "chromosome",
+  "start",
+  "end",
+  "name",
+  "reads in CLIP",
+  "reads in INPUT",
+  "p-value",
+  "chi_val_or_Fisher",
+  "Fisher_orChi_square_test",
+  "enriched_or_depleted",
+  "negative_log10p",
+  "log2_fold_change",
+  "entropy")
+  
+  
+  peakClean <- peakData %>%
+    mutate(peakID=paste(chromosome,start,end,sep="_"))
+  
+  annotClean <- peakAnnot %>%
+    mutate(peakID=paste(Chr,Start-1,End,sep="_")) %>%
+    select(all_of(c('peakID','Gene Name', 'Gene Type','Detailed Annotation')))
+  
+  annotPeaks <- left_join(peakClean,annotClean,by='peakID')
+  
+  write.csv(annotPeaks,outFile)
+  return(annotPeaks)
+}
+
+normPeakDir<-file.path(macRoot,"results/genomePeakCalling/peaksNorm")
+annotPeakDir<-file.path(macRoot,"results/genomePeakCalling")
+outDir<-file.path(macRoot,"summaryFiles/peakSummaryFiles")
+dir.create(outDir,recursive=TRUE)
+
+peakA<-annotatePeaks(file.path(normPeakDir,"SSEXPT8_IP_A_S3_R1_001.snoRNA.genome.Snord116_Snord116l2.chimeras.full"),file.path(annotPeakDir,"iNeuron_rep_coord.annotated.bed"), file.path(outDir,"iNeuron_A_Snord116genomePeaks.csv"))
+
+peakB<-annotatePeaks(file.path(normPeakDir,"SSEXPT8_IP_B_S4_R1_001.snoRNA.genome.Snord116_Snord116l2.chimeras.full"),file.path(annotPeakDir,"iNeuron_rep_coord.annotated.bed"), file.path(outDir,"iNeuron_B_Snord116genomePeaks.csv"))
+
+probe<-annotatePeaks(file.path(normPeakDir,"TDZ-7_S7_R1_001.snoRNA.genome.Snord116_Snord116l2.chimeras.full"),file.path(annotPeakDir,"TDZ-7_S7_R1_001.merge.annotated.bed"), file.path(outDir,"Probe_Snord116genomePeaks.csv"))
+
+```
+
+
+
+# Plots
+
+```{r}
+data <- probe
+plotOut<-"/Volumes/whipple_lab/Users/cwhilden/PROJECTS/THESIS/chapter2/plots/Snord116_chimeras"
+
+exportVolcano<-function(data,
+                        outputDir=plotOut,
+                        fileName){
+  
+  plot<-ggplot(data,
+       aes(x = log2_fold_change,
+           y = negative_log10p,
+           color = `Gene Type`)) +
+  geom_point(size = 1.5) +
+  geom_text_repel(
+    data = subset(data, negative_log10p > 30 | log2_fold_change > 10),
+    aes(label = `Gene Name`),   # replace gene_name with your label column
+    size          = 1,
+    max.overlaps  = Inf,
+    box.padding   = 0.4,
+    point.padding = 0.3,
+    segment.color = "grey50",
+    show.legend   = FALSE
+  ) +
+  themeCW()
+  
+  plotSave(plot,fileName,outputDir)
+}
+exportVolcano(probe, fileName="ProbeEnriched_genomicPeakSummary.pdf")
+exportVolcano(peakA, fileName="RepA_genomicPeakSummary.pdf")
+exportVolcano(peakB, fileName="RepB_genomicPeakSummary.pdf")
+```
+
+
+```{r}
+getEnriched<-function(data,
+                 sampleName){
+  sig <- data  %>%
+  filter(log2_fold_change>=0 & negative_log10p>=1) %>%
+  select(all_of(c(
+    "peakID",
+    "Gene Name",
+    "Gene Type",
+    "log2_fold_change",
+    "negative_log10p",
+    "Detailed Annotation" 
+  ))) %>%
+    mutate(sample=sampleName)
+  
+}
+
+probePeaks<-getEnriched(probe,'probeEnriched')
+ARepPeaks<-getEnriched(peakA,'RepA')
+BRepPeaks<-getEnriched(peakB,'RepB')
+
+
+allEnriched<-bind_rows(probePeaks,ARepPeaks,BRepPeaks)%>%
+  mutate(metaCat=if_else(`Gene Type` %in% c(
+    'transcribed_processed_pseudogene',
+    'TEC',
+    'snRNA',
+    'scaRNA',
+    'rRNA',
+    'Mt_tRNA',
+    'Mt_rRNA',
+    'misc_RNA',
+    'miRNA',
+    'IG_V_pseudogene',
+    'processed_pseudogene'),
+    'Other',
+    `Gene Type`))
+
+# Generate a summary by gene type
+enriched_summary <- allEnriched %>%
+  group_by(sample, metaCat) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  group_by(sample) %>%
+  mutate(proportion = count / sum(count),
+         percent    = round(proportion * 100, 1)) %>%
+  ungroup() %>%
+  mutate(
+    sample   = factor(sample,   levels = c("RepA", "RepB", "probeEnriched")),
+    metaCat  = factor(metaCat,  levels = c("snoRNA", "protein_coding", 
+                                            "lncRNA", "Other"))
+  )
+
+
+```
+
+
+```{r}
+bar<-ggplot(enriched_summary,
+       aes(x    = sample,
+           y    = count,
+           fill = metaCat)) +
+  geom_bar(stat     = "identity",
+           position = "dodge") +
+  geom_text(
+    aes(label = count),
+    position = position_dodge(width = 0.9),
+    vjust    = -0.5,
+    size     = 1
+  ) +
+  labs(
+    x     = "Sample",
+    y     = "Number of enriched peaks",
+    fill  = "Gene Type"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  themeCW()
+
+plotSave(bar,"EnrichedGenomicPeaks_AllSamples.pdf",outSave=plotOut)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Set significance threshold
+```{r}
+data<-probe
+sig <- data
+
+getSig<-function(data,
+                 sampleName){
+  sig <- data  %>%
+  filter(log2_fold_change>=1.5 & negative_log10p>=10) %>%
+  select(all_of(c(
+    "peakID",
+    "Gene Name",
+    "Gene Type",
+    "log2_fold_change",
+    "negative_log10p",
+    "Detailed Annotation" 
+  ))) %>%
+    mutate(sample=sampleName)
+  
+  
+  
+}
+
+
+probeSig<-getSig(probe,'probeEnriched')
+ARepSig<-getSig(peakA,'RepA')
+BRepSig<-getSig(peakB,'RepB')
+
+
+allSig<-bind_rows(probeSig,ARepSig,BRepSig)
+
+
+
+
+ggplot(sig, aes(x = `Gene Type`, fill = `Gene Type`)) +
+  geom_bar() +
+  geom_text(
+    stat  = "count",
+    aes(label = after_stat(count)),
+    vjust = -0.5,
+    size  = 3.5,
+    color = "black"
+  ) +
+  labs(
+    x     = "Gene Type",
+    y     = "Count",
+    title = "Number of Genes by Type"
+  ) +
+  theme(
+    axis.text.x  = element_text(angle = 45, hjust = 1),
+    legend.position = "none"          # color already shown on x-axis
+  ) +
+  themeCW()
+
+
+```
+
+
+```{r}
+venn_list <- list(
+  "Probe Enriched" = probeSig$`Gene Name`,
+  "Rep A"          = ARepSig$`Gene Name`,
+  "Rep B"          = BRepSig$`Gene Name`
+)
+# all three overlap
+all_three <- Reduce(intersect, venn_list)
+
+ggVennDiagram(venn_list) +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "Overlap of Significant Genes") +
+  theme(legend.position = "none")
+```
+
+
+
+
+
+
+
+
+
+

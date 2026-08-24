@@ -1,0 +1,4 @@
+/n/whipple_lab/share_root/Lab/data_raw_seq/SS_EXPT008_chimeclip/raw_fastq/SSEXPT8_IN_A_S1_R1_001.fastq.gz
+/n/whipple_lab/share_root/Lab/data_raw_seq/SS_EXPT008_chimeclip/raw_fastq/SSEXPT8_IN_B_S2_R1_001.fastq.gz
+/n/whipple_lab/share_root/Lab/data_raw_seq/TDZ_EXPT028_chimeclip/raw_fastq/TDZ-3_S3_R1_001.fastq.gz
+/n/whipple_lab/share_root/Lab/data_raw_seq/BB_EXP003_chimeCLIP_ESC/220425_A00794_fastq_lanemerged/Fbl_IN_S1_L12_R1_001.fastq.gz

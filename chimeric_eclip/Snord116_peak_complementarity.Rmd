@@ -1,0 +1,323 @@
+---
+title: "Snord116_complementarity_analysis.Rmd"
+author: "Courtney Whilden"
+date: "2026-03-19"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse, quietly=TRUE)
+library(ggrepel, quietly=TRUE)
+library(ggplot2, quietly=TRUE)
+library(pROC, quietly=TRUE)
+# Project directory
+clusterRoot <- "/n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2"
+macRoot     <- "/Volumes/whipple_lab/Users/cwhilden/PROJECTS/THESIS/chapter2"
+
+# Import whilden plot settings
+plotSave <- function(plotVar, fileName, outSave=outDir, w=1.5, h=1.5){
+  ggsave(
+  filename = file.path(outSave,fileName),
+  plot = plotVar,
+  device = "pdf",
+  width = w,
+  height = h,
+  units = "in"
+  )
+}
+
+# PLOT THEME
+paletteCW <- c(
+  Pink_CW      = "#EC008C",
+  Teal_CW      = "#008C8C",
+  Charcoal_CW  = "#2E2E2E",
+  LimeGreen_CW = "#9BC53D",
+  SoftOrange_CW= "#F4A261",
+  Purple_CW    = "#7B2CBF"
+)
+
+themeCW <- function(baseSize = 6) {
+  theme_minimal(base_size = baseSize) %+replace%
+    theme(
+      # panel
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(fill = NA, colour = "black", size = 0.5),
+      
+      # axes lines/ticks/text
+      axis.line = element_blank(),                      # border handles the visual frame
+      axis.ticks = element_line(size = 0.5),
+      axis.ticks.length = unit(0.03, "in"),
+      axis.text = element_text(size = baseSize, colour = "black"),
+      axis.title = element_text(size = baseSize, colour = "black"),
+      
+      # legend
+      legend.key        = element_blank(),
+      legend.background = element_blank(),
+      legend.text       = element_text(size = baseSize),
+      legend.title = element_blank(),
+      
+      legend.key.size   = unit(0.2, "cm"),
+      legend.spacing.y  = unit(1, "pt"),
+      legend.margin     = margin(0, 0, 0, 0, unit = "pt"),
+      legend.position = "top",
+      
+      # plot text & margins
+      plot.title = element_text(size = baseSize, colour = "black"),
+      plot.subtitle = element_text(size = baseSize, colour = "black"),
+      plot.margin = margin(5, 5, 5, 5, unit = "pt"),
+      
+      aspect.ratio=1
+    )
+}
+```
+
+## Get center 20 nt of each peak
+```{r}
+makeBedFile <- function(peaks, outFile, windowSize = 20) {
+  
+  # Middle of peak range set in function
+    halfWindow <- windowSize / 2
+  
+    # If the peak width is <20, keep the whole peak
+    # If peak width is >20, find the midpoint and extract +10 to -10
+    peaks2 <- peaks %>%
+        mutate(
+            peakID = paste(chromosome,
+                           start,
+                           end,
+                           sep = "_"),
+            
+            peakWidth = end - start,
+            midPoint  = start + (peakWidth / 2),
+
+            newStart = if_else(
+                peakWidth >= windowSize,
+                round(midPoint - halfWindow),
+                start
+            ),
+
+            newEnd = if_else(
+                peakWidth >= windowSize,
+                round(midPoint + halfWindow),
+                end
+            ),
+
+            # prevent negative coordinates
+            newStart = pmax(0, newStart)
+        )
+
+    bed <- peaks2 %>%
+        transmute(
+            chrom = chromosome,
+            start = as.integer(newStart),
+            end   = as.integer(newEnd),
+            name  = peakID
+        )
+
+    write.table(
+        bed,
+        file = outFile,
+        sep = "\t",
+        quote = FALSE,
+        row.names = FALSE,
+        col.names = FALSE
+    )
+}
+
+peaks <- read_csv("/Volumes/whipple_lab/Users/cwhilden/PROJECTS/THESIS/chapter2/summaryFiles/peakSummaryFiles/TDZ-7_S7_R1_001_Significant_Peak_Results.csv", show_col_types = FALSE)
+
+outDir<-"/Volumes/whipple_lab/Users/cwhilden/PROJECTS/THESIS/chapter2/results/RNAplex"
+dir.create(outDir, recursive = TRUE)
+makeBedFile(peaks, file.path(outDir,"All_peakCenters.bed"))
+
+
+```
+
+### Extract peaks 
+Use the peak bed coordinates to extract sequences from the reference genome
+```{bash, eval=FALSE}
+# Interactive session
+salloc -p test -c 8 --mem 50G -t 300
+
+# Set working directory
+cd /n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2/results/RNAplex
+
+# Activate environment
+module load Mambaforge
+mamba activate /n/whipple_lab/share_root/Users/cwhilden/ENVS/chimericCW_001
+
+# Generate .fasta files for each peak .bed file
+Ref=combined_canonicalTargets.fa
+
+bedtools getfasta -fi $Ref -bed All_peakCenters.bed -s -nameOnly -fo All_peakCenters.fa
+
+mamba deactivate
+```
+
+
+### Snord116 ASE sequences
+I selected the 25 nt upstream of the D box (ASE-D) and the D' box (ASE-D') motifs and put them into a fasta file (references/Snord116_Boxes.fa) Now, I will shuffle the ASEs to use as a control
+
+```{r}
+# Read fasta file
+read_fasta <- function(filepath) {
+  lines <- read_lines(filepath)
+  tibble(
+    name = str_remove(lines[str_detect(lines, "^>")], "^>"),
+    seq  = lines[!str_detect(lines, "^>")]
+  )
+}
+
+fasta<-file.path(macRoot,"references/Snord116_Boxes.fa")
+# Generate 5 shuffled versions of each sequence
+shuffled_fasta <- read_fasta(fasta) %>%
+  rowwise() %>%
+  mutate(shuffled = list(replicate(5, paste(sample(strsplit(seq, "")[[1]]), collapse = "")))) %>%
+  ungroup() %>%
+  unnest_longer(shuffled) %>%
+  group_by(name) %>%
+  mutate(version = row_number()) %>%
+  ungroup() %>%
+  mutate(header = paste0(name, "_shuffled_", version))
+
+# Write to new fasta file
+write_lines(
+  c(rbind(paste0(">", shuffled_fasta$header), shuffled_fasta$shuffled)),
+  file.path(macRoot,"results/RNAplex/Snord116_Boxes_Shuffled.fa")
+)
+```
+
+
+### Run RNA Plex
+Use RNAplex to test snoRNA target basepair complementarity
+```{bash, eval=FALSE}
+mamba activate /n/whipple_lab/share_root/Users/cwhilden/ENVS/viennaRNA_env
+
+# Canonical target screen
+RNAplex -q Snord116_Boxes.fa -t All_peakCenters.fa > RNAplex_results.txt
+
+mamba deactivate
+
+```
+
+
+### Convert RNA plex output to a csv
+Input: RNA plex results in a .txt file
+Output: RNA plex results in a readable format (.csv)
+```{r}
+readRnaPlex <- function(filePath,
+                        outputDir,
+                        outFileName) {
+  x <- readLines(filePath, warn = FALSE)
+  
+  fastaLines <- grep("^>", x)
+
+  # Get rid of the lines that contain Snord116 (only query used)
+  queryLines <- grep("^>Snord116",x)
+  
+  targetLines <- fastaLines[!fastaLines %in% queryLines]
+  
+  # each hit is: target line, query line, result line
+  # so targetLines should come in steps of 3
+  targets <- sub("^>", "", x[targetLines])
+  queries <- sub("^>", "", x[queryLines])
+  result  <- x[targetLines + 2]
+
+  # structure is everything up to the first occurrence of two+ spaces before coords
+  # (structure contains '.' '(' ')' '&')
+  structure <- sub("\\s{2,}.*$", "", result)
+
+  # parse "tStart,tEnd  :  qStart,qEnd"
+  coordPart <- sub("^.*?\\s{2,}([0-9]+,[0-9]+)\\s+:\\s+([0-9]+,[0-9]+).*$", "\\1|\\2", result)
+  tCoord <- sub("\\|.*$", "", coordPart)
+  qCoord <- sub("^.*\\|", "", coordPart)
+
+  tStart <- as.integer(sub(",.*$", "", tCoord))
+  tEnd   <- as.integer(sub("^.*,", "", tCoord))
+  qStart <- as.integer(sub(",.*$", "", qCoord))
+  qEnd   <- as.integer(sub("^.*,", "", qCoord))
+
+  # energy inside parentheses, e.g. (-25.30)
+  energyStr <- sub("^.*\\((-?[0-9.]+)\\).*$", "\\1", result)
+  energy <- as.numeric(energyStr)
+
+  result<-data.frame(
+    targetId = targets,
+    queryId  = queries,
+    structure = structure,
+    targetStart = tStart,
+    targetEnd   = tEnd,
+    queryStart  = qStart,
+    queryEnd    = qEnd,
+    energy      = energy,
+    stringsAsFactors = FALSE
+  )
+  
+  write.csv(result,
+            file.path(outputDir,
+                      outFileName))
+}
+
+# set file paths and output dir
+outDir <-outDir
+
+plexFile <-file.path(macRoot,"results/RNAplex/RNAplex_results.txt")
+
+
+readRnaPlex(plexFile,outDir,"RNAplex_results.csv")
+
+```
+
+
+## INTERACTION ENERGY V PEAK ENRICHMENT
+Read in result files
+```{r}
+plex <- read_csv(file.path(outDir,"RNAplex_results.csv"))
+
+canonCols <- c('snoRNA','targetId','reads in CLIP', 'reads in INPUT', 'log2_fold_change','negative_log10p','fraction')
+
+peak2 <- peaks %>%
+  mutate(targetId=paste0(chromosome,"_",start,"_",end,"()")) %>%
+  select(all_of(canonCols))
+
+join <- left_join(peak2, plex,
+                           by='targetId',
+                           relationship='many-to-many') %>%
+  mutate(is_sig=if_else(fraction>=0.1 & log2_fold_change>=1.5,
+                        "Sig","Not")) %>%
+  mutate(
+    # Split structure at & into target and query sides
+    target_structure = str_split_fixed(structure, "&", 2)[,1],
+    query_structure  = str_split_fixed(structure, "&", 2)[,2],
+    
+    # Target side metrics
+    target_length     = str_length(target_structure),
+    target_mismatches = str_count(target_structure, "\\."),
+    target_basepairs  = str_count(target_structure, "\\("),
+    target_pct_mismatch = (target_mismatches / target_length) * 100,
+    
+    # Query side metrics
+    query_length      = str_length(query_structure),
+    query_mismatches  = str_count(query_structure, "\\."),
+    query_basepairs   = str_count(query_structure, "\\)"),
+    query_pct_mismatch = (query_mismatches / query_length) * 100
+  ) %>%
+  mutate(snoID=if_else(snoRNA=='Snord116_Snord116l2', 'Snord116', 'other')) %>%
+  mutate (category=paste0(is_sig,"_",snoID))
+
+```
+
+
+
+```{r}
+snord116_dp <- join %>%
+  filter(snoRNA=='Snord116_Snord116l2' & queryId=='Snord116_Dpbox')
+
+snord116_dp %>%
+ggplot(aes(x=log2(fraction),
+           y=-energy)) +
+  geom_point() + themeCW()
+``` 
+

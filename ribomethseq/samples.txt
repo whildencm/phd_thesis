@@ -1,0 +1,14 @@
+CTL_CTX_BS2	/n/whipple_lab/share_root/Lab/data_raw_seq/CMW_EXPT055_rms_snord116/raw_fastq/BS2ctx_1.fq.gz
+DEL_CTX_BS1	/n/whipple_lab/share_root/Lab/data_raw_seq/CMW_EXPT055_rms_snord116/raw_fastq/BS1ctx_1.fq.gz
+DEL_CTX_BS3	/n/whipple_lab/share_root/Lab/data_raw_seq/CMW_EXPT055_rms_snord116/raw_fastq/BS3ctx_1.fq.gz
+CTL_CTX_BS7	/n/whipple_lab/share_root/Lab/data_raw_seq/CMW_EXPT055_rms_snord116/raw_fastq/BS7ctx_1.fq.gz
+CTL_HYPO_BS2	/n/whipple_lab/share_root/Lab/data_raw_seq/CMW_EXPT055_rms_snord116/raw_fastq/BS2hypo_1.fq.gz
+DEL_HYPO_BS1	/n/whipple_lab/share_root/Lab/data_raw_seq/CMW_EXPT055_rms_snord116/raw_fastq/BS1hypo_1.fq.gz
+DEL_HYPO_BS3	/n/whipple_lab/share_root/Lab/data_raw_seq/CMW_EXPT055_rms_snord116/raw_fastq/BS3hypo_1.fq.gz
+CTL_HYPO_BS7	/n/whipple_lab/share_root/Lab/data_raw_seq/CMW_EXPT055_rms_snord116/raw_fastq/BS7hypo_1.fq.gz
+CTL_iN_SA	/n/whipple_lab/share_root/Lab/data_raw_seq/SS_EXPT027_RMS/raw_fastq/Ctrl_A_144h_S9_L001_R1_001.fastq.gz
+CTL_iN_SB	/n/whipple_lab/share_root/Lab/data_raw_seq/SS_EXPT027_RMS/raw_fastq/Ctrl_B_144h_S10_L001_R1_001.fastq.gz
+CTL_iN_SC	/n/whipple_lab/share_root/Lab/data_raw_seq/SS_EXPT027_RMS/raw_fastq/Ctrl_C_144h_S1_L001_R1_001.fastq.gz
+KD_iN_SA	/n/whipple_lab/share_root/Lab/data_raw_seq/SS_EXPT027_RMS/raw_fastq/116_A_S11_L001_R1_001.fastq.gz
+KD_iN_SB	/n/whipple_lab/share_root/Lab/data_raw_seq/SS_EXPT027_RMS/raw_fastq/116_B_S12_L001_R1_001.fastq.gz
+KD_iN_SC	/n/whipple_lab/share_root/Lab/data_raw_seq/SS_EXPT027_RMS/raw_fastq/116_C_S2_L001_R1_001.fastq.gz

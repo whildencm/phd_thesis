@@ -1,0 +1,33 @@
+---
+title: "mapping_and_QC"
+author: "Courtney Whilden"
+date: "2026-08-13"
+output: html_document
+---
+
+## 1. Mapping
+Requires: config/Samples.txt
+
+```{bash}
+cd /n/lab_storage/whipple_lab/share_root/Users/cwhilden/PROJECTS/manuscript_2026/riboseq
+mkdir -p results
+
+sbatch scripts/Mapping.sh
+
+# Accidentally left out 2 samples on the first array job, so added them here:
+sbatch scripts/Mapping_rerun.sh
+```
+
+## 2. Quality control of RPFs
+-- Requires mapping.sh outputs
+
+-- Plots output to results/ribowaltz
+
+```{bash}
+salloc -p whipple --mem 100G -t 0-06:00 -c 8 
+
+module load Mambaforge
+mamba activate ribowaltz_2025
+
+Rscript scripts/Ribowaltz.r
+```

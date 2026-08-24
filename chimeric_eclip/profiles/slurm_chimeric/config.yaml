@@ -1,0 +1,82 @@
+# profiles/slurm_chimeric/config.yaml
+executor: slurm
+jobs: 371
+use-conda: true
+
+default-resources:
+  - slurm_partition=whipple
+  - slurm_account=whipple_lab
+  - runtime=500
+  - mem_mb=8000
+
+set-resources:
+
+  # Shared (IP + input samples)
+  umi_extract_adapter_trim:
+    mem_mb: 12000
+
+  # Index-building rules
+  index_snoRNA:
+    mem_mb: 4000
+
+  index_RNAtarget:
+    mem_mb: 4000
+
+  index_repBase_genome:
+    mem_mb: 4000
+
+  index_genome:
+    mem_mb: 80000
+    runtime: 1440                 
+
+  # Chimeric pipeline (IP samples)
+  map_snoRNA:
+    mem_mb: 8000
+
+  split_snoRNA_sams:
+    mem_mb: 8000
+
+  find_putative_targets:
+    mem_mb: 16000
+
+  map_true_snoRNA_targets:
+    mem_mb: 8000
+
+  map_RNAtargets:
+    mem_mb: 8000
+
+  compile_unmapped_RNAtarget:
+    mem_mb: 4000
+
+  map_repBase:
+    mem_mb: 8000
+
+  map_genome:
+    mem_mb: 80000
+    runtime: 1440
+
+  chimeric_sam_to_bam:
+    mem_mb: 12000
+
+  identify_chimeric_reads:
+    mem_mb: 16000
+
+  parse_individual_chimeras:
+    mem_mb: 16000
+
+  get_target_bam_lists:
+    mem_mb: 1000
+
+  # CLIP pipeline (input samples)
+  clip_map_RNAtargets: 
+    mem_mb: 8000
+
+  clip_map_repbase:
+    mem_mb: 8000
+
+  clip_map_snoRNA:
+    mem_mb: 8000
+
+  clip_map_genome:
+    mem_mb: 80000
+    runtime: 1440

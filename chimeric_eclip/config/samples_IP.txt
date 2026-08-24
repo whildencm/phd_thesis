@@ -1,0 +1,8 @@
+/n/whipple_lab/share_root/Lab/data_raw_seq/SS_EXPT008_chimeclip/raw_fastq/SSEXPT8_IP_A_S3_R1_001.fastq.gz
+/n/whipple_lab/share_root/Lab/data_raw_seq/SS_EXPT008_chimeclip/raw_fastq/SSEXPT8_IP_B_S4_R1_001.fastq.gz
+/n/whipple_lab/share_root/Lab/data_raw_seq/TDZ_EXPT028_chimeclip/raw_fastq/TDZ-7_S7_R1_001.fastq.gz
+/n/whipple_lab/share_root/Lab/data_raw_seq/IGS_EXP010_CWSnord116_chimeclip/raw_fastq/IGS_CW_1IP/IGS_CW_1IP_CKDL250021054-1A_22W7L3LT4_L4_1.fq.gz
+/n/whipple_lab/share_root/Lab/data_raw_seq/IGS_EXP010_CWSnord116_chimeclip/raw_fastq/IGS_CW_2IP/IGS_CW_2IP_CKDL250021054-1A_22W7L3LT4_L4_1.fq.gz
+/n/whipple_lab/share_root/Lab/data_raw_seq/IGS_EXP010_CWSnord116_chimeclip/raw_fastq/IGS_CW_3IP/IGS_CW_3IP_CKDL250021054-1A_22W7L3LT4_L4_1.fq.gz
+/n/whipple_lab/share_root/Lab/data_raw_seq/IGS_EXP010_CWSnord116_chimeclip/raw_fastq/IGS_CW_4IP/IGS_CW_4IP_CKDL250021054-1A_22W7L3LT4_L4_1.fq.gz
+/n/whipple_lab/share_root/Lab/data_raw_seq/BB_EXP003_chimeCLIP_ESC/220425_A00794_fastq_lanemerged/Fbl_IP_S2_L12_R1_001.fastq.gz

@@ -1,0 +1,486 @@
+---
+title: "Untitled"
+author: "Courtney Whilden"
+date: "2026-03-26"
+output: html_document
+---
+1. Load packages
+```{r}
+library(tidyverse, quietly=TRUE)
+library(ggplot2, quietly=TRUE)
+library(tools, quietly=TRUE)
+library(ggrepel, quietly=TRUE)
+```
+
+2. Set up plot themes
+```{r}
+# Project directory
+clusterRoot <- "/n/whipple_lab/share_root/Users/cwhilden/PROJECTS/THESIS/chapter2_RMS"
+macRoot     <- "/Volumes/whipple_lab/Users/cwhilden/PROJECTS/THESIS/chapter2_RMS"
+
+# PLOT THEME
+paletteCW <- c(
+  Pink_CW      = "#EC008C",
+  Teal_CW      = "#008C8C",
+  Charcoal_CW  = "#2E2E2E",
+  LimeGreen_CW = "#9BC53D",
+  SoftOrange_CW= "#F4A261",
+  Purple_CW    = "#7B2CBF"
+)
+
+themeCW <- function(baseSize = 6) {
+  theme_minimal(base_size = baseSize) %+replace%
+    theme(
+      # panel
+      panel.background = element_blank(),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(fill = NA, colour = "black", size = 0.5),
+      
+      # axes lines/ticks/text
+      axis.line = element_blank(),                      # border handles the visual frame
+      axis.ticks = element_line(size = 0.5),
+      axis.ticks.length = unit(0.03, "in"),
+      axis.text = element_text(size = baseSize, colour = "black"),
+      axis.title = element_text(size = baseSize, colour = "black"),
+      
+      # legend
+      legend.key        = element_blank(),
+      legend.background = element_blank(),
+      legend.text       = element_text(size = baseSize),
+      legend.title = element_blank(),
+      
+      legend.key.size   = unit(0.2, "cm"),
+      legend.spacing.y  = unit(1, "pt"),
+      legend.margin     = margin(0, 0, 0, 0, unit = "pt"),
+      legend.position = "top",
+      
+      # plot text & margins
+      plot.title = element_text(size = baseSize, colour = "black"),
+      plot.subtitle = element_text(size = baseSize, colour = "black"),
+      plot.margin = margin(5, 5, 5, 5, unit = "pt"),
+      
+      aspect.ratio=1
+    )
+}
+
+
+######################################
+# Function to save plots in my preferred size
+plotSave <- function(plotVar, fileName, outSave=outDir, w=1.5, h=1.5){
+  ggsave(
+  filename = file.path(outSave,fileName),
+  plot = plotVar,
+  device = "pdf",
+  width = w,
+  height = h,
+  units = "in"
+  )
+}
+```
+
+
+3. Read in rRNA data and annotations
+rRNA 
+```{r}
+RMS_dir<-"/Volumes/whipple_lab/Users/cwhilden/PROJECTS/THESIS/chapter2_RMS/results/rmsScores/rRNA"
+Nm<-read_csv("/Volumes/whipple_lab/Users/cwhilden/PIPELINE/ribomethseq/data/mouseNmSites.csv") %>%
+  mutate(ID=paste(TARGET,POSITION,sep="_"))
+
+dataFiles<-list.files(path = RMS_dir, 
+                        pattern = "\\.rms.txt$", 
+                        full.names = TRUE)
+
+# Extract sample/snoRNA information from filename
+names<-sub("\\.rms.txt$","",basename(dataFiles))
+
+# generate a named list of data
+data <- purrr::set_names(dataFiles, names) %>%
+  purrr::map(~ readr::read_tsv(.x))
+
+# Merge named list into a single data frame
+merged_data <- dplyr::bind_rows(data, .id = "sample")  %>%
+  tidyr::separate(sample, 
+                  into = c("condition", "tissue", "sampleid"), 
+                  sep  = "_") %>%
+  filter(chrom=='45S_Rn45s',
+         tissue=='CTX' | tissue=='iN') %>%
+  mutate(
+    ID    = paste(chrom, position, sep = "_"),
+    status = if_else(ID %in% Nm$ID, 'known Nm', 'unknown')) %>%
+    mutate(site_status=case_when(position>=10415 & position<=10427 ~ "aseD",
+                         position>=11961 & position<=11971 ~ "aseDp",
+                         status == 'known Nm' ~ 'Nm',
+                
+                         TRUE ~ "other")) %>%
+  # Only keep scores for nucleotides with high coverage
+  filter(coverage>=10000 & site_status != 'other') %>%
+  mutate(group=paste0(condition,"_",tissue))
+
+```
+# Heat map
+```{r}
+heatmap <- merged_data %>%
+  mutate(sampleFull = paste(condition, tissue, sampleid, sep = '_')) %>%
+  filter(site_status == 'Nm' ) %>%
+  mutate(
+    condition = factor(condition, levels = c("DEL","KD", "CTL")),
+    tissue    = factor(tissue,    levels = c("iNeuron", "CTX"))
+  ) %>%
+  arrange(tissue, condition, sampleid) %>%          # DEL rows first, CTL rows last
+  mutate(
+    sampleFull = factor(sampleFull, levels = unique(sampleFull))  # lock in that order
+  )
+
+plot_heat<-ggplot(heatmap,
+       aes(x    = factor(position),
+           y    = sampleFull,
+           fill = RMS)) +
+  geom_tile() +
+  scale_fill_gradient2(
+    low     = "blue",
+    mid     = "white",
+    high    = "magenta",
+    midpoint = 0.5
+  ) +
+  facet_wrap(~ tissue, ncol = 1, scales = "free_y") +
+  labs(
+    x    = "45S rRNA pos: known Nm",
+    y    = "Sample",
+    fill = "RMS Score",
+    title = "RMS Score by Position and Sample"
+  ) + theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size=4))
+
+outDir<-file.path(macRoot,"plots")
+
+plotSave(plot_heat,"Heatmap_knownNm.pdf",h=4,w=6)
+plot_heat
+```
+
+
+
+
+
+
+```{r}
+# Summary table: mean RMS and SEM per position and condition
+rms_summary <- merged_data %>%
+  group_by(chrom, position, ID, site_status, group) %>%
+  summarise(
+    mean_rms = mean(RMS, na.rm = TRUE),
+    se_rms   = sd(RMS, na.rm = TRUE) / sqrt(n()),
+    n        = n(),
+    .groups  = "drop"
+  ) %>%
+  tidyr::pivot_wider(
+    id_cols     = c(position, ID, site_status),
+    names_from  = group,
+    values_from = c(mean_rms, se_rms)
+  )
+
+```
+
+
+Plot known Nm sites: iNeurons v. cortex
+```{r}
+# ── Step 1: count quadrants BEFORE nm is overwritten by ggplot ────────────────
+quadrant_counts <- nm %>%
+  mutate(
+    quadrant = case_when(
+      mean_rms_CTL_CTX >= 0.5 & mean_rms_CTL_iN >= 0.5 ~ "top_right",
+      mean_rms_CTL_CTX <  0.5 & mean_rms_CTL_iN >= 0.5 ~ "top_left",
+      mean_rms_CTL_CTX <  0.5 & mean_rms_CTL_iN <  0.5 ~ "bottom_left",
+      mean_rms_CTL_CTX >= 0.5 & mean_rms_CTL_iN <  0.5 ~ "bottom_right"
+    )
+  ) %>%
+  count(quadrant)
+
+print(quadrant_counts)
+
+# ── Step 2: build plot with counts annotated in each quadrant ─────────────────
+nm_plot <- ggplot(nm,
+       aes(x = mean_rms_CTL_CTX,
+           y = mean_rms_CTL_iN)) +
+  geom_point(size = 1.5) +
+  geom_errorbar(
+    aes(ymin = mean_rms_CTL_iN - se_rms_CTL_iN,
+        ymax = mean_rms_CTL_iN + se_rms_CTL_iN),
+    width = 0, alpha = 0.4
+  ) +
+  geom_errorbarh(
+    aes(xmin = mean_rms_CTL_CTX - se_rms_CTL_CTX,
+        xmax = mean_rms_CTL_CTX + se_rms_CTL_CTX),
+    height = 0, alpha = 0.4
+  ) +
+  geom_vline(xintercept = 0.5) +
+  geom_hline(yintercept = 0.5) +
+  
+  # ── quadrant labels ──────────────────────────────────────────────────────────
+  annotate("text", x = 0.9,  y = 0.95,
+           label = quadrant_counts$n[quadrant_counts$quadrant == "top_right"],
+           hjust = 0.5, fontface = "bold") +
+  annotate("text", x = 0.1,  y = 0.95,
+           label = quadrant_counts$n[quadrant_counts$quadrant == "top_left"],
+           hjust = 0.5, fontface = "bold") +
+  annotate("text", x = 0.1,  y = 0.05,
+           label = quadrant_counts$n[quadrant_counts$quadrant == "bottom_left"],
+           hjust = 0.5, fontface = "bold") +
+  annotate("text", x = 0.9,  y = 0.05,
+           label = quadrant_counts$n[quadrant_counts$quadrant == "bottom_right"],
+           hjust = 0.5, fontface = "bold") +
+  
+  themeCW()
+
+outDir<-file.path(macRoot,"plots")
+dir.create(outDir, recursive=TRUE)
+
+plotSave(nm_plot,"Nm_Ctx_v_iNeurons.pdf")
+nm_plot
+```
+
+Function to plot RMS data w/ labelled quadrants
+```{r}
+plot_rms_quadrants <- function(
+    data,
+    x_col,
+    y_col,
+    threshold  = 0.5,
+    point_size = 1.5,
+    filename   = NULL,
+    outDir=file.path(macRoot, "plots")
+) {
+  
+  # ── pull SE column names from x/y mean column names ────────────────────────
+  x_se <- sub("mean_rms", "se_rms", x_col)
+  y_se <- sub("mean_rms", "se_rms", y_col)
+  
+  # ── Step 1: count quadrants ─────────────────────────────────────────────────
+  quadrant_counts <- data %>%
+    mutate(
+      quadrant = case_when(
+        .data[[x_col]] >= threshold & .data[[y_col]] >= threshold ~ "top_right",
+        .data[[x_col]] <  threshold & .data[[y_col]] >= threshold ~ "top_left",
+        .data[[x_col]] <  threshold & .data[[y_col]] <  threshold ~ "bottom_left",
+        .data[[x_col]] >= threshold & .data[[y_col]] <  threshold ~ "bottom_right"
+      )
+    ) %>%
+    count(quadrant)
+  
+  print(quadrant_counts)
+  
+  # ── helper: safely pull count (returns 0 if quadrant absent) ────────────────
+  get_n <- function(q) {
+    val <- quadrant_counts$n[quadrant_counts$quadrant == q]
+    if (length(val) == 0) return(0) else return(val)
+  }
+  
+  # ── Step 2: build plot ──────────────────────────────────────────────────────
+  p <- ggplot(data,
+              aes(x = .data[[x_col]],
+                  y = .data[[y_col]])) +
+    geom_point(size = point_size) +
+    
+    # ── fix: simple arithmetic inside aes() ───────────────────────────────────
+    geom_errorbar(
+      aes(ymin = .data[[y_col]] - .data[[y_se]],
+          ymax = .data[[y_col]] + .data[[y_se]]),
+      width = 0, alpha = 0.4
+    ) +
+    geom_errorbarh(
+      aes(xmin = .data[[x_col]] - .data[[x_se]],
+          xmax = .data[[x_col]] + .data[[x_se]]),
+      height = 0, alpha = 0.4
+    ) +
+    geom_vline(xintercept = threshold) +
+    geom_hline(yintercept = threshold) +
+    
+    annotate("text", x = 0.9, y = 0.95, hjust = 0.5, fontface = "bold",
+             label = get_n("top_right")) +
+    annotate("text", x = 0.1, y = 0.95, hjust = 0.5, fontface = "bold",
+             label = get_n("top_left")) +
+    annotate("text", x = 0.1, y = 0.05, hjust = 0.5, fontface = "bold",
+             label = get_n("bottom_left")) +
+    annotate("text", x = 0.9, y = 0.05, hjust = 0.5, fontface = "bold",
+             label = get_n("bottom_right")) +
+    
+    labs(x = x_col, y = y_col) +
+    themeCW()
+  
+  # ── Step 3: save using your original plotSave style ─────────────────────────
+  if (!is.null(filename)) {
+    
+    dir.create(outDir, recursive = TRUE, showWarnings = FALSE)
+    plotSave(p, filename, outSave=outDir)                  # ← matches your original usage
+  }
+  
+  return(p)
+}
+```
+
+# generate and save plots
+```{r}
+plot_rms_quadrants(
+    data=filter(rms_summary,site_status=='Nm'),                         
+    x_col='mean_rms_CTL_iN',                       
+    y_col='mean_rms_CTL_CTX',                       
+    threshold  = 0.5,             
+    point_size = 1.5,
+    filename   = "KnownNm_Cortex_v_iNeurons.pdf")
+```
+```{r}
+plot_rms_quadrants(
+    data=filter(rms_summary,site_status=='aseD'),                         
+    x_col='mean_rms_CTL_iN',                       
+    y_col='mean_rms_CTL_CTX',                       
+    threshold  = 0.5,             
+    point_size = 1.5,
+    filename   = "aseD_Cortex_v_iNeurons.pdf")
+```
+```{r}
+plot_rms_quadrants(
+    data=filter(rms_summary,site_status=='aseDp'),                         
+    x_col='mean_rms_CTL_iN',                       
+    y_col='mean_rms_CTL_CTX',                       
+    threshold  = 0.5,             
+    point_size = 1.5,
+    filename   = "aseDp_Cortex_v_iNeurons.pdf")
+```
+
+
+## Statistics
+- Comparing RMS scores between CTL / DEL cortex and CTL / KD iNeurons at high-RMS score sites and known Nm sites
+
+Cortex
+```{r}
+df_stat_cortex <- merged_data %>%
+  select(all_of(c(
+    'condition',
+    'tissue',
+    'sampleid',
+    'position',
+    'RMS',
+    'site_status'
+  ))) %>%
+  filter(tissue=='CTX',
+         RMS >0)
+
+
+# Safe wrapper
+safe_wilcox <- possibly(
+  ~ wilcox_test(.x, RMS ~ condition),
+  otherwise = NULL
+)
+
+# Keep position label when splitting
+wilcox_ctx <- df_stat_cortex %>%
+  group_by(position) %>%
+  group_map(function(x, key) {
+    result <- safe_wilcox(x)
+    if (!is.null(result)) {
+      result$position <- key$position   # ← key automatically contains group label
+    }
+    result
+  }) %>%
+  bind_rows() %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance()
+
+
+head(wilcox_ctx)
+```
+
+iNeuron
+```{r}
+df_stat_iN <- merged_data %>%
+  select(all_of(c(
+    'condition',
+    'tissue',
+    'sampleid',
+    'position',
+    'RMS',
+    'site_status'
+  ))) %>%
+  filter(tissue=='iN',
+         RMS >0)
+
+
+# Safe wrapper
+safe_wilcox <- possibly(
+  ~ wilcox_test(.x, RMS ~ condition),
+  otherwise = NULL
+)
+
+# Keep position label when splitting
+wilcox_iN <- df_stat_iN %>%
+  group_by(position) %>%
+  group_map(function(x, key) {
+    result <- safe_wilcox(x)
+    if (!is.null(result)) {
+      result$position <- key$position   # ← key automatically contains group label
+    }
+    result
+  }) %>%
+  bind_rows() %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance()
+
+
+head(wilcox_iN)
+```
+
+```{r}
+plotData<-filter(rms_summary, site_status != "Nm")
+ctx<-ggplot(plotData,
+       aes(x = mean_rms_CTL_CTX,
+           y = mean_rms_DEL_CTX,
+           color = site_status)) +
+  geom_point(size = 1.5) +
+  geom_errorbar(
+    aes(ymin = mean_rms_DEL_CTX - se_rms_DEL_CTX,    # ← no rms_summary[[]]
+        ymax = mean_rms_DEL_CTX + se_rms_DEL_CTX),
+    width = 0, alpha = 0.4
+  ) +
+  geom_text_repel(
+    aes(label=position)) +
+  
+  geom_errorbarh(
+    aes(xmin = mean_rms_CTL_CTX - se_rms_CTL_CTX,    # ← no rms_summary[[]]
+        xmax = mean_rms_CTL_CTX + se_rms_CTL_CTX),
+    height = 0, alpha = 0.4
+  ) +
+  themeCW()
+
+outDir<-file.path(macRoot,'plots')
+plotSave(ctx,"Ctl_v_Del_ctx.pdf",h=3,w=3)
+ctx
+```
+
+```{r}
+plotData<-filter(rms_summary, site_status != "Nm")
+
+iN<-ggplot(plotData,
+       aes(x = mean_rms_CTL_iN,
+           y = mean_rms_KD_iN,
+           color = site_status)) +
+  geom_point(size = 1.5) +
+  geom_errorbar(
+    aes(ymin =mean_rms_KD_iN - se_rms_KD_iN,    
+        ymax = mean_rms_KD_iN + se_rms_KD_iN),
+    width = 0, alpha = 0.4
+  ) +
+  geom_text_repel(
+    aes(label=position)) +
+  geom_errorbarh(
+    aes(xmin = mean_rms_CTL_iN - se_rms_CTL_iN,
+        xmax = mean_rms_CTL_iN + se_rms_CTL_iN),
+    height = 0, alpha = 0.4
+  ) +
+  themeCW()
+
+outDir<-file.path(macRoot,'plots')
+plotSave(iN,"Ctl_v_Del_iN.pdf",h=3,w=3)
+iN
+```
+
+
